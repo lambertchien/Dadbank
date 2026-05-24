@@ -11,7 +11,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
   const serviceSupabase = await createServiceClient()
   const { data: profile } = await serviceSupabase
     .from('profiles')
-    .select('name, role, balance')
+    .select('name, role')
     .eq('id', user.id)
     .single()
 

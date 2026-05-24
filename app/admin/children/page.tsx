@@ -482,11 +482,32 @@ export default function ChildrenPage() {
                   <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{child.name}</div>
                   <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{child.email}</div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: child.balance >= 0 ? '#16a34a' : '#dc2626' }}>
-                    {formatMoney(child.balance)}
+                <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.4rem' }}>
+                  <div>
+                    <div style={{ fontSize: '1.5rem', fontWeight: 700, color: child.balance >= 0 ? '#16a34a' : '#dc2626' }}>
+                      {formatMoney(child.balance)}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>balance</div>
                   </div>
-                  <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>balance</div>
+                  <button
+                    onClick={async () => {
+                      if (!confirm(`Delete ${child.name}'s account and all their data? This cannot be undone.`)) return
+                      const res = await fetch('/api/admin/delete-child', {
+                        method: 'DELETE',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ childId: child.id }),
+                      })
+                      if (res.ok) { setMsg(`${child.name}'s account deleted`); load() }
+                      else { const j = await res.json(); setMsg(j.error ?? 'Delete failed') }
+                    }}
+                    style={{
+                      fontSize: '0.7rem', color: '#dc2626', background: 'none',
+                      border: '1px solid #fecaca', borderRadius: '0.5rem',
+                      padding: '0.2rem 0.5rem', cursor: 'pointer',
+                    }}
+                  >
+                    Delete
+                  </button>
                 </div>
               </div>
 
