@@ -528,19 +528,17 @@ export default function ChildrenPage() {
               {section === 'checklist' && (
                 <div style={{ padding: '1.5rem' }}>
                   {approved ? (
-                    <div style={{
-                      background: completedTithes.has(cl?.id ?? '') ? '#f0fdf4' : '#fefce8',
-                      border: `1px solid ${completedTithes.has(cl?.id ?? '') ? '#bbf7d0' : '#fde047'}`,
-                      borderRadius: '0.75rem', padding: '1rem',
-                      display: 'flex', alignItems: 'center', gap: '0.75rem',
-                      color: completedTithes.has(cl?.id ?? '') ? '#15803d' : '#854d0e',
-                      fontWeight: 600,
-                    }}>
-                      <span style={{ fontSize: '1.25rem' }}>{completedTithes.has(cl?.id ?? '') ? '✅' : '⏳'}</span>
-                      {completedTithes.has(cl?.id ?? '')
-                        ? `Tithe given — net savings deposited`
-                        : `Allowance approved — ${formatMoney(total)} waiting for tithe decision`}
-                    </div>
+                    !completedTithes.has(cl?.id ?? '') && (
+                      <div style={{
+                        background: '#fefce8', border: '1px solid #fde047',
+                        borderRadius: '0.75rem', padding: '1rem',
+                        display: 'flex', alignItems: 'center', gap: '0.75rem',
+                        color: '#854d0e', fontWeight: 600,
+                      }}>
+                        <span style={{ fontSize: '1.25rem' }}>⏳</span>
+                        {`Allowance approved — ${formatMoney(total)} waiting for tithe decision`}
+                      </div>
+                    )
                   ) : (
                     <>
                       {/* Part 1: Required */}
@@ -725,9 +723,9 @@ export default function ChildrenPage() {
               {section === 'adjust' && (
                 <div style={{ padding: '1.5rem' }}>
                   {/* Manual tithe status cards */}
-                  {(manualTithes[child.id] ?? []).length > 0 && (
+                  {(manualTithes[child.id] ?? []).filter(r => !r.completed).length > 0 && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.25rem' }}>
-                      {(manualTithes[child.id] ?? []).map(record => (
+                      {(manualTithes[child.id] ?? []).filter(r => !r.completed).map(record => (
                         <div key={record.id} style={{
                           background: record.completed ? '#f0fdf4' : '#fefce8',
                           border: `1px solid ${record.completed ? '#bbf7d0' : '#fde047'}`,
@@ -841,6 +839,24 @@ export default function ChildrenPage() {
                         ))}
                       </div>
                     </div>
+
+                    {/* Sum total */}
+                    {!historyLoading.has(child.id) && txList.length > 0 && (hf.type !== '' || hf.span !== 0) && (() => {
+                      const net = txList.reduce((s, tx) => s + tx.amount, 0)
+                      const s = hf.type ? TX_STYLES[hf.type] : null
+                      return (
+                        <div style={{
+                          background: s?.bg ?? '#f8fafc', border: `1px solid ${s ? s.color + '33' : '#e2e8f0'}`,
+                          borderRadius: '0.75rem', padding: '0.75rem 1rem', marginBottom: '0.75rem',
+                          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                        }}>
+                          <span style={{ fontSize: '0.8rem', color: '#64748b' }}>{txList.length} transaction{txList.length !== 1 ? 's' : ''}</span>
+                          <span style={{ fontWeight: 700, fontSize: '1rem', color: net >= 0 ? '#15803d' : '#dc2626' }}>
+                            {net >= 0 ? '+' : ''}{formatMoney(net)}
+                          </span>
+                        </div>
+                      )
+                    })()}
 
                     {/* Transaction list */}
                     {historyLoading.has(child.id) ? (

@@ -314,6 +314,10 @@ export default function DashboardPage() {
             (!filterType || tx.type === filterType) &&
             (!cutoff || new Date(tx.created_at) >= cutoff)
           )
+          const showSum = (filterType !== '' || timeSpan !== 0) && filtered.length > 0
+          const net = showSum ? filtered.reduce((s, tx) => s + tx.amount, 0) : 0
+          const sumStyle = filterType ? TX_STYLES[filterType] : null
+
           // Compute running balance: newest tx has balance = current balance
           // Each older tx: subtract the newer tx's amount
           const currentBalance = profile?.balance ?? 0
@@ -333,6 +337,19 @@ export default function DashboardPage() {
           )
           return (
             <div style={{ display: 'flex', flexDirection: 'column' }}>
+              {showSum && (
+                <div style={{
+                  background: sumStyle?.bg ?? '#f8fafc',
+                  border: `1px solid ${sumStyle ? sumStyle.color + '33' : '#e2e8f0'}`,
+                  borderRadius: '0.75rem', padding: '0.75rem 1rem', marginBottom: '0.75rem',
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                }}>
+                  <span style={{ fontSize: '0.8rem', color: '#64748b' }}>{filtered.length} transaction{filtered.length !== 1 ? 's' : ''}</span>
+                  <span style={{ fontWeight: 700, fontSize: '1rem', color: net >= 0 ? '#15803d' : '#dc2626' }}>
+                    {net >= 0 ? '+' : ''}{formatMoney(net)}
+                  </span>
+                </div>
+              )}
               {filtered.map(tx => {
                 const style = TX_STYLES[tx.type] ?? TX_STYLES.adjustment
                 const bal = balanceMap.get(tx.id)
