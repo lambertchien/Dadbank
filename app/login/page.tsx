@@ -17,24 +17,21 @@ export default function LoginPage() {
     setLoading(true)
 
     const supabase = createClient()
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (error) {
-      setError(error.message)
+      setError('Wrong email or password. Try again.')
       setLoading(false)
       return
     }
 
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { setLoading(false); return }
-
     const { data: profile } = await supabase
       .from('profiles')
       .select('role')
-      .eq('id', user.id)
+      .eq('id', data.user.id)
       .single()
 
-    router.push(profile?.role === 'admin' ? '/admin' : '/dashboard')
+    router.push(profile?.role === 'admin' ? '/admin/children' : '/dashboard')
     router.refresh()
   }
 
