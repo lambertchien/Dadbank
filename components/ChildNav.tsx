@@ -4,11 +4,7 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
-function formatMoney(n: number) {
-  return '$' + n.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
-}
-
-export default function ChildNav({ name, balance }: { name: string; balance: number }) {
+export default function ChildNav({ name }: { name: string }) {
   const pathname = usePathname()
   const router = useRouter()
 
@@ -61,15 +57,7 @@ export default function ChildNav({ name, balance }: { name: string; balance: num
 
       <div style={{ flex: 1 }} />
 
-      <div style={{
-        background: '#dcfce7', borderRadius: '999px',
-        padding: '0.35rem 0.875rem',
-        fontSize: '0.875rem', fontWeight: 700, color: '#15803d',
-      }}>
-        {formatMoney(balance)}
-      </div>
-
-      <span className="hide-mobile" style={{ fontSize: '0.875rem', color: '#64748b', marginLeft: '0.5rem' }}>{name}</span>
+      <span style={{ fontSize: '0.875rem', color: '#64748b' }}>{name}</span>
 
       <button onClick={signOut} className="btn-secondary" style={{ padding: '0.375rem 0.75rem', fontSize: '0.78rem', marginLeft: '0.25rem' }}>
         Sign out

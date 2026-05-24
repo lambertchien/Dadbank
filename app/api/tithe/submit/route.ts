@@ -40,7 +40,7 @@ export async function POST(req: Request) {
     child_id: user.id,
     amount: record.income_amount,
     type: record.checklist_id ? 'allowance' : 'deposit',
-    description: record.checklist_id ? 'Weekly allowance' : 'Admin deposit',
+    description: record.checklist_id ? 'Weekly allowance' : (record.description || 'Admin deposit'),
     reference_id: record.checklist_id ?? record.id,
     created_by: user.id,
   })

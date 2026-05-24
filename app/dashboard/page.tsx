@@ -314,6 +314,18 @@ export default function DashboardPage() {
             (!filterType || tx.type === filterType) &&
             (!cutoff || new Date(tx.created_at) >= cutoff)
           )
+          // Compute running balance: newest tx has balance = current balance
+          // Each older tx: subtract the newer tx's amount
+          const currentBalance = profile?.balance ?? 0
+          const balanceAfter: number[] = []
+          let running = currentBalance
+          for (let i = 0; i < transactions.length; i++) {
+            balanceAfter[i] = running
+            running -= transactions[i].amount
+          }
+          // Map filtered tx back to their balanceAfter using index in full list
+          const balanceMap = new Map(transactions.map((tx, i) => [tx.id, balanceAfter[i]]))
+
           if (filtered.length === 0) return (
             <p style={{ color: '#94a3b8', textAlign: 'center', padding: '2rem 0' }}>
               {transactions.length === 0 ? 'No transactions yet. Your allowance is coming!' : 'No transactions match this filter.'}
@@ -323,6 +335,7 @@ export default function DashboardPage() {
             <div style={{ display: 'flex', flexDirection: 'column' }}>
               {filtered.map(tx => {
                 const style = TX_STYLES[tx.type] ?? TX_STYLES.adjustment
+                const bal = balanceMap.get(tx.id)
                 return (
                   <div key={tx.id} style={{
                     display: 'flex', alignItems: 'center', gap: '0.75rem',
@@ -349,6 +362,7 @@ export default function DashboardPage() {
                       <div style={{ fontSize: '0.875rem', color: '#374151' }}>{tx.description}</div>
                       <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.1rem' }}>
                         {new Date(tx.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        {bal !== undefined && <span style={{ marginLeft: '0.5rem' }}>· Balance: {formatMoney(bal)}</span>}
                       </div>
                     </div>
                     <div style={{

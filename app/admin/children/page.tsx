@@ -293,6 +293,7 @@ export default function ChildrenPage() {
         tithe_amount: Math.ceil(amount * pct / 100),
         tithe_percentage: pct,
         completed: false,
+        description: form.description || null,
       })
       if (error) { setMsg(error.message); setAdjustSaving(null); return }
       setMsg(`Deposit pending — ${child.name} will be asked to decide tithe`)
@@ -807,47 +808,59 @@ export default function ChildrenPage() {
                       <p style={{ color: '#94a3b8', textAlign: 'center', padding: '1.5rem 0' }}>Loading...</p>
                     ) : txList.length === 0 ? (
                       <p style={{ color: '#94a3b8', textAlign: 'center', padding: '1.5rem 0' }}>No transactions found.</p>
-                    ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column' }}>
-                        {txList.map(tx => {
-                          const s = TX_STYLES[tx.type] ?? TX_STYLES.adjustment
-                          return (
-                            <div key={tx.id} style={{
-                              display: 'flex', alignItems: 'center', gap: '0.75rem',
-                              padding: '0.75rem 0', borderBottom: '1px solid #f1f5f9',
-                            }}>
-                              <div style={{
-                                width: '36px', height: '36px',
-                                background: s.bg, borderRadius: '50%',
-                                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                fontSize: '1rem', flexShrink: 0,
-                              }}>{s.emoji}</div>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.1rem', flexWrap: 'wrap' }}>
-                                  <span style={{
-                                    background: s.bg, color: s.color,
-                                    fontSize: '0.7rem', fontWeight: 700,
-                                    padding: '0.1rem 0.45rem', borderRadius: '999px',
-                                  }}>{s.label}</span>
-                                  {tx.category && <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{tx.category}</span>}
-                                </div>
-                                <div style={{ fontSize: '0.825rem', color: '#374151' }}>{tx.description}</div>
-                                <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.1rem' }}>
-                                  {new Date(tx.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-                                </div>
-                              </div>
-                              <div style={{
-                                fontWeight: 700, fontSize: '0.95rem',
-                                color: tx.amount >= 0 ? '#16a34a' : '#dc2626',
-                                flexShrink: 0,
+                    ) : (() => {
+                      const allTx = childHistory[child.id] ?? []
+                      const balanceAfter: number[] = []
+                      let running = child.balance
+                      for (let i = 0; i < allTx.length; i++) {
+                        balanceAfter[i] = running
+                        running -= allTx[i].amount
+                      }
+                      const balanceMap = new Map(allTx.map((tx, i) => [tx.id, balanceAfter[i]]))
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column' }}>
+                          {txList.map(tx => {
+                            const s = TX_STYLES[tx.type] ?? TX_STYLES.adjustment
+                            const bal = balanceMap.get(tx.id)
+                            return (
+                              <div key={tx.id} style={{
+                                display: 'flex', alignItems: 'center', gap: '0.75rem',
+                                padding: '0.75rem 0', borderBottom: '1px solid #f1f5f9',
                               }}>
-                                {tx.amount >= 0 ? '+' : ''}{formatMoney(tx.amount)}
+                                <div style={{
+                                  width: '36px', height: '36px',
+                                  background: s.bg, borderRadius: '50%',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  fontSize: '1rem', flexShrink: 0,
+                                }}>{s.emoji}</div>
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginBottom: '0.1rem', flexWrap: 'wrap' }}>
+                                    <span style={{
+                                      background: s.bg, color: s.color,
+                                      fontSize: '0.7rem', fontWeight: 700,
+                                      padding: '0.1rem 0.45rem', borderRadius: '999px',
+                                    }}>{s.label}</span>
+                                    {tx.category && <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{tx.category}</span>}
+                                  </div>
+                                  <div style={{ fontSize: '0.825rem', color: '#374151' }}>{tx.description}</div>
+                                  <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.1rem' }}>
+                                    {new Date(tx.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                                    {bal !== undefined && <span style={{ marginLeft: '0.5rem' }}>· Balance: {formatMoney(bal)}</span>}
+                                  </div>
+                                </div>
+                                <div style={{
+                                  fontWeight: 700, fontSize: '0.95rem',
+                                  color: tx.amount >= 0 ? '#16a34a' : '#dc2626',
+                                  flexShrink: 0,
+                                }}>
+                                  {tx.amount >= 0 ? '+' : ''}{formatMoney(tx.amount)}
+                                </div>
                               </div>
-                            </div>
-                          )
-                        })}
-                      </div>
-                    )}
+                            )
+                          })}
+                        </div>
+                      )
+                    })()}
                   </div>
                 )
               })()}

@@ -19,7 +19,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <div style={{ minHeight: '100vh', background: '#f0fdf4' }}>
-      <ChildNav name={profile?.name ?? ''} balance={profile?.balance ?? 0} />
+      <ChildNav name={profile?.name ?? ''} />
       <main style={{ maxWidth: '680px', margin: '0 auto', padding: '1.5rem 1rem' }}>
         {children}
       </main>

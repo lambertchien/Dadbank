@@ -218,6 +218,7 @@ create table if not exists public.tithe_records (
   tithe_amount     numeric(10,2) not null,
   tithe_percentage numeric(5,2) not null,
   completed        boolean not null default false,
+  description      text,
   created_at       timestamptz default now()
 );
 alter table public.tithe_records enable row level security;
