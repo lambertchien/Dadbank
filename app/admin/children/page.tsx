@@ -20,6 +20,7 @@ type ChecklistWithItems = WeeklyChecklist & { checklist_items: (ChecklistItem & 
 type WRWithProfile = WithdrawalRequest & { profiles: { name: string; balance: number } }
 type SectionKey = 'checklist' | 'withdrawals' | 'adjust' | 'history'
 type AdjustForm = { amount: string; description: string; type: 'deposit' | 'adjustment'; tithe: boolean }
+type ManualTitheRecord = { id: string; income_amount: number; completed: boolean; description: string | null; created_at: string }
 
 const TX_STYLES: Record<string, { bg: string; color: string; label: string; emoji: string }> = {
   allowance:  { bg: '#dcfce7', color: '#15803d', label: 'Allowance', emoji: '💰' },
@@ -57,13 +58,14 @@ export default function ChildrenPage() {
 
   const [adjustForms, setAdjustForms] = useState<Record<string, AdjustForm>>({})
   const [adjustSaving, setAdjustSaving] = useState<string | null>(null)
+  const [manualTithes, setManualTithes] = useState<Record<string, ManualTitheRecord[]>>({})
 
   const [childHistory, setChildHistory] = useState<Record<string, Transaction[]>>({})
   const [historyLoading, setHistoryLoading] = useState<Set<string>>(new Set())
   const [historyFilters, setHistoryFilters] = useState<Record<string, { type: string; span: number }>>({})
 
   const load = useCallback(async () => {
-    const [{ data: ch }, { data: cr }, { data: cl }, { data: settings }, { data: titheSetting }, { data: wr }, { data: asgn }, { data: titheDone }] = await Promise.all([
+    const [{ data: ch }, { data: cr }, { data: cl }, { data: settings }, { data: titheSetting }, { data: wr }, { data: asgn }, { data: titheDone }, { data: manualTitheData }] = await Promise.all([
       supabase.from('profiles').select('*').eq('role', 'child').order('name'),
       supabase.from('chore_templates').select('*').eq('active', true).order('type').order('sort_order'),
       supabase.from('weekly_checklists').select('*, checklist_items(*, chore_templates(*))').eq('week_start', weekStart),
@@ -72,6 +74,7 @@ export default function ChildrenPage() {
       supabase.from('withdrawal_requests').select('*, profiles(name, balance)').eq('status', 'pending').order('created_at', { ascending: true }),
       supabase.from('chore_assignments').select('child_id, chore_id'),
       supabase.from('tithe_records').select('checklist_id').eq('completed', true),
+      supabase.from('tithe_records').select('id, child_id, income_amount, completed, description, created_at').is('checklist_id', null).order('created_at', { ascending: false }),
     ])
 
     setChildren(ch ?? [])
@@ -92,6 +95,13 @@ export default function ChildrenPage() {
     }
     setAssignments(asgnMap)
     setCompletedTithes(new Set((titheDone ?? []).map(t => t.checklist_id).filter(Boolean)))
+
+    const manualMap: Record<string, ManualTitheRecord[]> = {}
+    for (const t of manualTitheData ?? []) {
+      if (!manualMap[t.child_id]) manualMap[t.child_id] = []
+      manualMap[t.child_id].push(t as ManualTitheRecord)
+    }
+    setManualTithes(manualMap)
 
     setLoading(false)
   }, [supabase, weekStart])
@@ -714,6 +724,35 @@ export default function ChildrenPage() {
               {/* Adjust section */}
               {section === 'adjust' && (
                 <div style={{ padding: '1.5rem' }}>
+                  {/* Manual tithe status cards */}
+                  {(manualTithes[child.id] ?? []).length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1.25rem' }}>
+                      {(manualTithes[child.id] ?? []).map(record => (
+                        <div key={record.id} style={{
+                          background: record.completed ? '#f0fdf4' : '#fefce8',
+                          border: `1px solid ${record.completed ? '#bbf7d0' : '#fde047'}`,
+                          borderRadius: '0.75rem', padding: '0.875rem 1rem',
+                          display: 'flex', alignItems: 'center', gap: '0.75rem',
+                        }}>
+                          <span style={{ fontSize: '1.25rem', flexShrink: 0 }}>{record.completed ? '✅' : '⏳'}</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 600, color: record.completed ? '#15803d' : '#854d0e', fontSize: '0.875rem' }}>
+                              {record.completed ? 'Tithe given — net deposited' : `${formatMoney(record.income_amount)} waiting for tithe decision`}
+                            </div>
+                            {record.description && (
+                              <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: '0.15rem' }}>{record.description}</div>
+                            )}
+                            <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '0.15rem' }}>
+                              {new Date(record.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            </div>
+                          </div>
+                          <div style={{ fontWeight: 700, color: record.completed ? '#15803d' : '#92400e', flexShrink: 0 }}>
+                            {formatMoney(record.income_amount)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div className="form-grid-3">
                     <div>
                       <label className="label">Type</label>
