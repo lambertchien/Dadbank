@@ -167,7 +167,7 @@ export default function DashboardPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
             <span style={{ fontSize: '1.5rem' }}>🙏</span>
             <div>
-              <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>Allowance Ready!</div>
+              <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{pendingTithe.checklist_id ? 'Allowance Ready!' : 'Deposit Ready!'}</div>
               <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
                 Decide your tithe to receive your money
               </div>
@@ -180,7 +180,7 @@ export default function DashboardPage() {
           }}>
             <div style={{ display: 'flex', gap: '1rem' }}>
               <div style={{ flex: 1, textAlign: 'center' }}>
-                <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Allowance</div>
+                <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>{pendingTithe.checklist_id ? 'Allowance' : 'Deposit'}</div>
                 <div style={{ fontWeight: 700, color: '#1e293b', fontSize: '1.1rem' }}>{formatMoney(allowanceAmount)}</div>
               </div>
               {pendingTithe.income_amount > allowanceAmount && (

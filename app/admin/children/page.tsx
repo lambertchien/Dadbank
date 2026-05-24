@@ -19,7 +19,7 @@ function getThisSaturday() {
 type ChecklistWithItems = WeeklyChecklist & { checklist_items: (ChecklistItem & { chore_templates: ChoreTemplate })[] }
 type WRWithProfile = WithdrawalRequest & { profiles: { name: string; balance: number } }
 type SectionKey = 'checklist' | 'withdrawals' | 'adjust' | 'history'
-type AdjustForm = { amount: string; description: string; type: 'deposit' | 'adjustment' }
+type AdjustForm = { amount: string; description: string; type: 'deposit' | 'adjustment'; tithe: boolean }
 
 const TX_STYLES: Record<string, { bg: string; color: string; label: string; emoji: string }> = {
   allowance:  { bg: '#dcfce7', color: '#15803d', label: 'Allowance', emoji: '💰' },
@@ -49,6 +49,7 @@ export default function ChildrenPage() {
   const [checklists, setChecklists] = useState<Record<string, ChecklistWithItems>>({})
   const [completedTithes, setCompletedTithes] = useState<Set<string>>(new Set())
   const [defaultAllowance, setDefaultAllowance] = useState(100)
+  const [defaultTithePct, setDefaultTithePct] = useState(10)
   const [checklistSaving, setChecklistSaving] = useState<string | null>(null)
 
   const [withdrawals, setWithdrawals] = useState<WRWithProfile[]>([])
@@ -62,11 +63,12 @@ export default function ChildrenPage() {
   const [historyFilters, setHistoryFilters] = useState<Record<string, { type: string; span: number }>>({})
 
   const load = useCallback(async () => {
-    const [{ data: ch }, { data: cr }, { data: cl }, { data: settings }, { data: wr }, { data: asgn }, { data: titheDone }] = await Promise.all([
+    const [{ data: ch }, { data: cr }, { data: cl }, { data: settings }, { data: titheSetting }, { data: wr }, { data: asgn }, { data: titheDone }] = await Promise.all([
       supabase.from('profiles').select('*').eq('role', 'child').order('name'),
       supabase.from('chore_templates').select('*').eq('active', true).order('type').order('sort_order'),
       supabase.from('weekly_checklists').select('*, checklist_items(*, chore_templates(*))').eq('week_start', weekStart),
       supabase.from('app_settings').select('*').eq('key', 'default_allowance').single(),
+      supabase.from('app_settings').select('value').eq('key', 'tithe_percentage').single(),
       supabase.from('withdrawal_requests').select('*, profiles(name, balance)').eq('status', 'pending').order('created_at', { ascending: true }),
       supabase.from('chore_assignments').select('child_id, chore_id'),
       supabase.from('tithe_records').select('checklist_id').eq('completed', true),
@@ -75,6 +77,7 @@ export default function ChildrenPage() {
     setChildren(ch ?? [])
     setChores(cr ?? [])
     if (settings) setDefaultAllowance(parseFloat(settings.value))
+    if (titheSetting) setDefaultTithePct(parseFloat(titheSetting.value))
 
     const clMap: Record<string, ChecklistWithItems> = {}
     for (const c of cl ?? []) clMap[c.child_id] = c as ChecklistWithItems
@@ -274,25 +277,40 @@ export default function ChildrenPage() {
   }
 
   async function applyAdjustment(child: Profile) {
-    const form = adjustForms[child.id] ?? { amount: '', description: '', type: 'deposit' }
+    const form = adjustForms[child.id] ?? { amount: '', description: '', type: 'deposit', tithe: false }
     setAdjustSaving(child.id)
     setMsg('')
 
     const amount = parseFloat(form.amount)
-    const finalAmount = form.type === 'deposit' ? Math.abs(amount) : -Math.abs(amount)
 
-    const { data: { user } } = await supabase.auth.getUser()
-    const { error } = await supabase.from('transactions').insert({
-      child_id: child.id,
-      amount: finalAmount,
-      type: form.type,
-      description: form.description || (form.type === 'deposit' ? 'Admin deposit' : 'Admin adjustment'),
-      created_by: user?.id,
-    })
+    if (form.type === 'deposit' && form.tithe) {
+      const { data: settings } = await supabase.from('app_settings').select('value').eq('key', 'tithe_percentage').single()
+      const pct = parseFloat(settings?.value ?? '10')
+      const { error } = await supabase.from('tithe_records').insert({
+        child_id: child.id,
+        checklist_id: null,
+        income_amount: amount,
+        tithe_amount: Math.ceil(amount * pct / 100),
+        tithe_percentage: pct,
+        completed: false,
+      })
+      if (error) { setMsg(error.message); setAdjustSaving(null); return }
+      setMsg(`Deposit pending — ${child.name} will be asked to decide tithe`)
+    } else {
+      const finalAmount = form.type === 'deposit' ? Math.abs(amount) : -Math.abs(amount)
+      const { data: { user } } = await supabase.auth.getUser()
+      const { error } = await supabase.from('transactions').insert({
+        child_id: child.id,
+        amount: finalAmount,
+        type: form.type,
+        description: form.description || (form.type === 'deposit' ? 'Admin deposit' : 'Admin adjustment'),
+        created_by: user?.id,
+      })
+      if (error) { setMsg(error.message); setAdjustSaving(null); return }
+      setMsg('Done!')
+    }
 
-    if (error) { setMsg(error.message); setAdjustSaving(null); return }
-    setMsg('Done!')
-    setAdjustForms(prev => ({ ...prev, [child.id]: { amount: '', description: '', type: 'deposit' } }))
+    setAdjustForms(prev => ({ ...prev, [child.id]: { amount: '', description: '', type: 'deposit', tithe: false } }))
     load()
     setAdjustSaving(null)
     setTimeout(() => setMsg(''), 3000)
@@ -408,7 +426,7 @@ export default function ChildrenPage() {
           const extraItems = items.filter(i => i.chore_templates?.type === 'extra')
           const reqAllChecked = reqChores.length > 0 && reqItems.length > 0 && reqItems.every(i => i.checked)
           const childWithdrawals = withdrawals.filter(w => w.child_id === child.id)
-          const adjustForm = adjustForms[child.id] ?? { amount: '', description: '', type: 'deposit' as const }
+          const adjustForm = adjustForms[child.id] ?? { amount: '', description: '', type: 'deposit' as const, tithe: false }
 
           const tabs = [
             {
@@ -425,7 +443,7 @@ export default function ChildrenPage() {
             },
             {
               key: 'adjust' as SectionKey,
-              label: '⚙️ Adjust',
+              label: '⚙️ Manual +/-',
               badge: null,
               badgeBg: '', badgeColor: '',
             },
@@ -723,6 +741,17 @@ export default function ChildrenPage() {
                         }))} />
                     </div>
                   </div>
+                  {adjustForm.type === 'deposit' && (
+                    <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.75rem', cursor: 'pointer', fontSize: '0.875rem', color: '#374151' }}>
+                      <input
+                        type="checkbox"
+                        checked={adjustForm.tithe}
+                        onChange={e => setAdjustForms(prev => ({ ...prev, [child.id]: { ...adjustForm, tithe: e.target.checked } }))}
+                        style={{ width: '16px', height: '16px', accentColor: '#7c3aed' }}
+                      />
+                      <span>🙏 Ask child to decide tithe (min {defaultTithePct}%)</span>
+                    </label>
+                  )}
                   <button className="btn-primary" style={{ marginTop: '1rem' }}
                     onClick={() => applyAdjustment(child)}
                     disabled={adjustSaving === child.id || !adjustForm.amount}>
