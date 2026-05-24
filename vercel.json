@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/allowance",
+      "schedule": "0 9 * * 6"
+    },
+    {
+      "path": "/api/cron/notify",
+      "schedule": "0 21 * * 6"
+    },
+    {
+      "path": "/api/cron/interest",
+      "schedule": "0 0 1 * *"
+    }
+  ]
+}
