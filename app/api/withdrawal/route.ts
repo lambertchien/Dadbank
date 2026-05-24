@@ -9,7 +9,7 @@ export async function POST(req: Request) {
   if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const { amount, category, reason } = await req.json()
-  if (!amount || !category || !reason) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
+  if (!amount || !category) return NextResponse.json({ error: 'Missing fields' }, { status: 400 })
 
   const serviceSupabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,

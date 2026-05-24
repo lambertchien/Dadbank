@@ -31,6 +31,9 @@ export async function POST(req: Request) {
   if (titheAmount < minTithe - 0.01) {
     return NextResponse.json({ error: `Tithe must be at least ${record.tithe_percentage}%` }, { status: 400 })
   }
+  if (titheAmount > record.income_amount) {
+    return NextResponse.json({ error: 'Tithe cannot exceed your allowance' }, { status: 400 })
+  }
 
   // Insert allowance transaction (full income)
   await serviceSupabase.from('transactions').insert({
