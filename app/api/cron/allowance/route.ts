@@ -4,7 +4,8 @@ import { createClient } from '@supabase/supabase-js'
 // Runs every Saturday at 9am — pre-creates checklist rows for each child
 export async function GET(req: Request) {
   const auth = req.headers.get('authorization')
-  if (auth !== `Bearer ${process.env.CRON_SECRET}`) {
+  const qs = new URL(req.url).searchParams.get('secret')
+  if (auth !== `Bearer ${process.env.CRON_SECRET}` && qs !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
