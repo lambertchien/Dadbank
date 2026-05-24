@@ -5,7 +5,7 @@ export const resend = new Resend(process.env.RESEND_API_KEY ?? 're_placeholder')
 export async function sendAllowanceReminder(to: string[], appUrl: string) {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
   await resend.emails.send({
-    from: 'DadBank <noreply@dadbank.app>',
+    from: 'DadBank <onboarding@resend.dev>',
     to,
     subject: `🏦 DadBank — Time to review allowances (${today})`,
     html: `
@@ -23,7 +23,7 @@ export async function sendAllowanceReminder(to: string[], appUrl: string) {
           </p>
         </div>
         <div style="text-align: center; margin-bottom: 1.5rem;">
-          <a href="${appUrl}/admin/checklist"
+          <a href="${appUrl}/admin/children"
              style="display: inline-block; background: #16a34a; color: white; text-decoration: none;
                     font-weight: 600; padding: 0.875rem 2rem; border-radius: 0.75rem; font-size: 1rem;">
             Review Checklists →
@@ -39,7 +39,7 @@ export async function sendAllowanceReminder(to: string[], appUrl: string) {
 
 export async function sendWithdrawalAlert(to: string[], childName: string, amount: number, category: string, reason: string, appUrl: string) {
   await resend.emails.send({
-    from: 'DadBank <noreply@dadbank.app>',
+    from: 'DadBank <onboarding@resend.dev>',
     to,
     subject: `🏦 DadBank — ${childName} wants to spend $${Math.ceil(amount)}`,
     html: `
