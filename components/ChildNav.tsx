@@ -17,6 +17,7 @@ export default function ChildNav({ name }: { name: string }) {
   const links = [
     { href: '/dashboard', label: 'My Bank', emoji: '🏦' },
     { href: '/dashboard/withdraw', label: 'Get Money', emoji: '💵' },
+    { href: '/dashboard/settings', label: 'Settings', emoji: '⚙️' },
   ]
 
   return (
