@@ -22,7 +22,10 @@ export async function DELETE(req: Request) {
   const { data: child } = await serviceSupabase.from('profiles').select('role').eq('id', childId).single()
   if (!child || child.role !== 'child') return NextResponse.json({ error: 'Not a child account' }, { status: 400 })
 
-  // Deleting from auth.users cascades to profiles and all related data
+  // chore_assignments has no cascade — delete manually before removing the user
+  await serviceSupabase.from('chore_assignments').delete().eq('child_id', childId)
+
+  // Deleting from auth.users cascades to profiles and all other related data
   const { error } = await serviceSupabase.auth.admin.deleteUser(childId)
   if (error) return NextResponse.json({ error: error.message }, { status: 400 })
 
