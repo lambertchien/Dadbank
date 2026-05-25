@@ -18,6 +18,11 @@ export default function SettingsPage() {
   const [msg, setMsg] = useState('')
   const [editingReward, setEditingReward] = useState<Record<string, string>>({})
 
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [pwMsg, setPwMsg] = useState('')
+  const [pwMsgOk, setPwMsgOk] = useState(true)
+
   const load = useCallback(async () => {
     const [{ data: s }, { data: cr }, { data: cat }, { data: ch }, { data: asgn }, { data: { user } }] = await Promise.all([
       supabase.from('app_settings').select('*'),
@@ -71,6 +76,20 @@ export default function SettingsPage() {
     setMsg('Notification email saved!')
     setSaving('')
     setTimeout(() => setMsg(''), 2000)
+  }
+
+  async function changePassword() {
+    if (newPassword.length < 6) { setPwMsgOk(false); setPwMsg('Password must be at least 6 characters'); return }
+    if (newPassword !== confirmPassword) { setPwMsgOk(false); setPwMsg('Passwords do not match'); return }
+    setSaving('password')
+    const { error } = await supabase.auth.updateUser({ password: newPassword })
+    if (error) { setPwMsgOk(false); setPwMsg(error.message); setSaving(''); return }
+    setPwMsgOk(true)
+    setPwMsg('Password updated!')
+    setNewPassword('')
+    setConfirmPassword('')
+    setSaving('')
+    setTimeout(() => setPwMsg(''), 3000)
   }
 
   async function addChore() {
@@ -422,6 +441,53 @@ export default function SettingsPage() {
             onKeyDown={e => e.key === 'Enter' && addCategory()}
           />
           <button className="btn-primary" style={{ flexShrink: 0 }} onClick={addCategory}>Add</button>
+        </div>
+      </div>
+
+      {/* Change Password */}
+      <div className="card">
+        <h2 style={{ margin: '0 0 0.5rem', fontSize: '1.1rem', fontWeight: 700 }}>🔑 Change Password</h2>
+        <p style={{ margin: '0 0 1.25rem', fontSize: '0.875rem', color: '#64748b' }}>
+          Update the password for your admin account.
+        </p>
+        {pwMsg && (
+          <div style={{
+            background: pwMsgOk ? '#dcfce7' : '#fee2e2',
+            color: pwMsgOk ? '#15803d' : '#991b1b',
+            padding: '0.75rem 1rem', borderRadius: '0.75rem', fontSize: '0.875rem', marginBottom: '1rem',
+          }}>
+            {pwMsg}
+          </div>
+        )}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '360px' }}>
+          <div>
+            <label className="label">New Password</label>
+            <input
+              className="input"
+              type="password"
+              placeholder="Min 6 characters"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="label">Confirm Password</label>
+            <input
+              className="input"
+              type="password"
+              placeholder="Type it again"
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+            />
+          </div>
+          <button
+            className="btn-primary"
+            onClick={changePassword}
+            disabled={saving === 'password' || newPassword.length < 6 || newPassword !== confirmPassword}
+            style={{ alignSelf: 'flex-start' }}
+          >
+            {saving === 'password' ? 'Saving...' : 'Update Password'}
+          </button>
         </div>
       </div>
     </div>
