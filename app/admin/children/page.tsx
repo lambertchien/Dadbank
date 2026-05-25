@@ -126,7 +126,7 @@ export default function ChildrenPage() {
   function getChildChores(childId: string): ChoreTemplate[] {
     const assigned = assignments[childId]
     if (assigned && assigned.length > 0) return chores.filter(c => assigned.includes(c.id))
-    return chores
+    return []
   }
 
   async function ensureChecklist(childId: string, childChores?: ChoreTemplate[]): Promise<ChecklistWithItems> {
