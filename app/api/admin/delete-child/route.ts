@@ -22,11 +22,13 @@ export async function DELETE(req: Request) {
   const { data: child } = await serviceSupabase.from('profiles').select('role').eq('id', childId).single()
   if (!child || child.role !== 'child') return NextResponse.json({ error: 'Not a child account' }, { status: 400 })
 
-  // These tables lack ON DELETE CASCADE or have FKs that block cascade — delete manually first
+  // Delete in order to avoid FK violations during the final cascade:
+  // - chore_assignments has no cascade at all
+  // - withdrawal_requests.transaction_id → transactions(id), no cascade
+  // - tithe_records.checklist_id → weekly_checklists(id), no cascade
   await serviceSupabase.from('chore_assignments').delete().eq('child_id', childId)
-  // withdrawal_requests.transaction_id → transactions(id) with no cascade, so clear withdrawals
-  // before transactions get cascade-deleted by deleteUser
   await serviceSupabase.from('withdrawal_requests').delete().eq('child_id', childId)
+  await serviceSupabase.from('tithe_records').delete().eq('child_id', childId)
 
   // Deleting from auth.users cascades to profiles and all other related data
   const { error } = await serviceSupabase.auth.admin.deleteUser(childId)
