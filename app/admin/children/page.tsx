@@ -116,8 +116,8 @@ export default function ChildrenPage() {
     children.forEach(child => {
       const cl = checklists[child.id]
       const childChores = getChildChores(child.id)
-      if ((!cl || cl.checklist_items.length === 0) && childChores.length > 0) {
-        ensureChecklist(child.id, childChores)
+      if (!cl || cl.checklist_items.length === 0) {
+        ensureChecklist(child.id, childChores.length > 0 ? childChores : undefined)
       }
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -131,7 +131,8 @@ export default function ChildrenPage() {
 
   async function ensureChecklist(childId: string, childChores?: ChoreTemplate[]): Promise<ChecklistWithItems> {
     if (checklists[childId]?.checklist_items.length > 0) return checklists[childId]
-    const choresToUse = childChores ?? getChildChores(childId)
+    const assigned = childChores ?? getChildChores(childId)
+    const choresToUse = assigned.length > 0 ? assigned : chores
 
     const { data: existing } = await supabase
       .from('weekly_checklists')
@@ -451,12 +452,9 @@ export default function ChildrenPage() {
           const items = cl?.checklist_items ?? []
           const total = (cl?.base_amount ?? 0) + (cl?.extra_amount ?? 0)
           const approved = cl?.status === 'approved'
-          const childChores = getChildChores(child.id)
-          const reqChores = childChores.filter(c => c.type === 'required')
-          const extraChores = childChores.filter(c => c.type === 'extra')
           const reqItems = items.filter(i => i.chore_templates?.type === 'required')
           const extraItems = items.filter(i => i.chore_templates?.type === 'extra')
-          const reqAllChecked = reqChores.length > 0 && reqItems.length > 0 && reqItems.every(i => i.checked)
+          const reqAllChecked = reqItems.length > 0 && reqItems.every(i => i.checked)
           const childWithdrawals = withdrawals.filter(w => w.child_id === child.id)
           const adjustForm = adjustForms[child.id] ?? { amount: '', description: '', type: 'deposit' as const, tithe: false }
 
@@ -600,11 +598,11 @@ export default function ChildrenPage() {
                           </span>
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                          {reqChores.map(chore => {
-                            const item = reqItems.find(i => i.chore_id === chore.id)
-                            if (!item) return null
+                          {reqItems.map(item => {
+                            const chore = item.chore_templates
+                            if (!chore) return null
                             return (
-                              <label key={chore.id} style={{
+                              <label key={item.id} style={{
                                 display: 'flex', alignItems: 'center', gap: '0.75rem',
                                 padding: '0.625rem 0.875rem',
                                 background: item.checked ? '#f0fdf4' : '#f8fafc',
@@ -620,7 +618,7 @@ export default function ChildrenPage() {
                               </label>
                             )
                           })}
-                          {reqChores.length === 0 && (
+                          {reqItems.length === 0 && (
                             <p style={{ color: '#94a3b8', fontSize: '0.875rem', padding: '0.5rem 0' }}>
                               No required chores assigned. Go to Settings to assign chores.
                             </p>
@@ -634,7 +632,7 @@ export default function ChildrenPage() {
                       </div>
 
                       {/* Part 2: Extra */}
-                      {extraChores.length > 0 && (
+                      {extraItems.length > 0 && (
                         <div style={{ marginBottom: '1.25rem' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
                             <span style={{ background: '#fef3c7', color: '#d97706', fontSize: '0.75rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px' }}>
@@ -643,11 +641,11 @@ export default function ChildrenPage() {
                             <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Optional bonus</span>
                           </div>
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                            {extraChores.map(chore => {
-                              const item = extraItems.find(i => i.chore_id === chore.id)
-                              if (!item) return null
+                            {extraItems.map(item => {
+                              const chore = item.chore_templates
+                              if (!chore) return null
                               return (
-                                <label key={chore.id} style={{
+                                <label key={item.id} style={{
                                   display: 'flex', alignItems: 'center', gap: '0.75rem',
                                   padding: '0.625rem 0.875rem',
                                   background: item.checked ? '#fffbeb' : '#f8fafc',
