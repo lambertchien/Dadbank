@@ -58,6 +58,7 @@ export interface ChecklistItem {
   checklist_id: string
   chore_id: string
   checked: boolean
+  count: number
   reward_earned: number
   chore_templates?: ChoreTemplate
 }

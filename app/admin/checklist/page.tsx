@@ -130,20 +130,31 @@ export default function ChecklistPage() {
 
   async function toggleItem(childId: string, itemId: string, chore: ChoreTemplate, checked: boolean) {
     const cl = await ensureChecklist(childId)
-    const reward = checked && chore.type === 'extra' ? (chore.reward_amount ?? 0) : 0
-
-    await supabase.from('checklist_items').update({ checked, reward_earned: reward }).eq('id', itemId)
-
-    // Recalculate totals
+    await supabase.from('checklist_items').update({ checked, reward_earned: 0, count: 0 }).eq('id', itemId)
     const updatedItems = cl.checklist_items.map(i =>
-      i.id === itemId ? { ...i, checked, reward_earned: reward } : i
+      i.id === itemId ? { ...i, checked, reward_earned: 0, count: 0 } : i
     )
     const requiredAll = updatedItems.filter(i => i.chore_templates?.type === 'required').every(i => i.checked)
     const baseAmount = requiredAll ? defaultAllowance : 0
     const extraAmount = updatedItems.filter(i => i.chore_templates?.type === 'extra').reduce((s, i) => s + i.reward_earned, 0)
-
     await supabase.from('weekly_checklists').update({ base_amount: baseAmount, extra_amount: extraAmount }).eq('id', cl.id)
+    setChecklists(prev => ({
+      ...prev,
+      [childId]: { ...cl, base_amount: baseAmount, extra_amount: extraAmount, checklist_items: updatedItems } as ChecklistWithItems
+    }))
+  }
 
+  async function setExtraCount(childId: string, itemId: string, chore: ChoreTemplate, count: number) {
+    const cl = await ensureChecklist(childId)
+    const reward = count * (chore.reward_amount ?? 0)
+    await supabase.from('checklist_items').update({ count, checked: count > 0, reward_earned: reward }).eq('id', itemId)
+    const updatedItems = cl.checklist_items.map(i =>
+      i.id === itemId ? { ...i, count, checked: count > 0, reward_earned: reward } : i
+    )
+    const requiredAll = updatedItems.filter(i => i.chore_templates?.type === 'required').every(i => i.checked)
+    const baseAmount = requiredAll ? defaultAllowance : 0
+    const extraAmount = updatedItems.filter(i => i.chore_templates?.type === 'extra').reduce((s, i) => s + i.reward_earned, 0)
+    await supabase.from('weekly_checklists').update({ base_amount: baseAmount, extra_amount: extraAmount }).eq('id', cl.id)
     setChecklists(prev => ({
       ...prev,
       [childId]: { ...cl, base_amount: baseAmount, extra_amount: extraAmount, checklist_items: updatedItems } as ChecklistWithItems
@@ -342,32 +353,44 @@ export default function ChecklistPage() {
                     {extras.map(chore => {
                       const item = extraItems.find(i => i.chore_id === chore.id)
                       if (!item) return null
+                      const count = item.count ?? 0
+                      const earned = count * (chore.reward_amount ?? 0)
                       return (
-                        <label key={chore.id} style={{
+                        <div key={chore.id} style={{
                           display: 'flex', alignItems: 'center', gap: '0.75rem',
                           padding: '0.75rem 1rem',
-                          background: item.checked ? '#fffbeb' : '#f8fafc',
+                          background: count > 0 ? '#fffbeb' : '#f8fafc',
                           borderRadius: '0.75rem',
-                          cursor: 'pointer',
-                          border: `1px solid ${item.checked ? '#fde68a' : '#e2e8f0'}`,
+                          border: `1px solid ${count > 0 ? '#fde68a' : '#e2e8f0'}`,
                           transition: 'all 0.15s',
                         }}>
-                          <input
-                            type="checkbox"
-                            checked={item.checked}
-                            onChange={e => toggleItem(child.id, item.id, chore, e.target.checked)}
-                            style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#d97706' }}
-                          />
                           <span style={{ fontWeight: 500, flex: 1 }}>{chore.name}</span>
+                          <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{formatMoney(chore.reward_amount ?? 0)}/session ×</span>
+                          <select
+                            value={count}
+                            onChange={e => setExtraCount(child.id, item.id, chore, parseInt(e.target.value))}
+                            style={{
+                              border: '1px solid #e2e8f0', borderRadius: '0.5rem',
+                              padding: '0.25rem 0.5rem', fontSize: '0.9rem',
+                              fontWeight: 700, cursor: 'pointer',
+                              background: count > 0 ? '#fef3c7' : '#f8fafc',
+                              color: count > 0 ? '#d97706' : '#64748b',
+                            }}
+                          >
+                            {Array.from({length: 16}, (_, n) => (
+                              <option key={n} value={n}>{n}</option>
+                            ))}
+                          </select>
                           <span style={{
-                            background: item.checked ? '#fef3c7' : '#f1f5f9',
-                            color: item.checked ? '#d97706' : '#94a3b8',
+                            background: count > 0 ? '#fef3c7' : '#f1f5f9',
+                            color: count > 0 ? '#d97706' : '#94a3b8',
                             fontSize: '0.85rem', fontWeight: 700,
                             padding: '0.2rem 0.6rem', borderRadius: '999px',
+                            minWidth: '3.5rem', textAlign: 'right',
                           }}>
-                            +{formatMoney(chore.reward_amount ?? 0)}
+                            +{formatMoney(earned)}
                           </span>
-                        </label>
+                        </div>
                       )
                     })}
                     {extras.length === 0 && (

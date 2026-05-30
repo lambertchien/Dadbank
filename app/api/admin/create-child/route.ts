@@ -57,5 +57,5 @@ export async function POST(req: Request) {
     await serviceSupabase.from('profiles').update({ balance }).eq('id', newUser.user.id)
   }
 
-  return NextResponse.json({ success: true })
+  return NextResponse.json({ success: true, childId: newUser.user.id })
 }

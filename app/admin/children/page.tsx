@@ -43,6 +43,7 @@ export default function ChildrenPage() {
 
   const [showAdd, setShowAdd] = useState(false)
   const [addForm, setAddForm] = useState({ name: '', email: '', password: '', starting_balance: '' })
+  const [addChores, setAddChores] = useState<string[]>([])
   const [addingSaving, setAddingSaving] = useState(false)
 
   const [chores, setChores] = useState<ChoreTemplate[]>([])
@@ -193,20 +194,33 @@ export default function ChildrenPage() {
 
   async function toggleItem(childId: string, itemId: string, chore: ChoreTemplate, checked: boolean) {
     const cl = await ensureChecklist(childId)
-    const reward = checked && chore.type === 'extra' ? (chore.reward_amount ?? 0) : 0
-
-    await supabase.from('checklist_items').update({ checked, reward_earned: reward }).eq('id', itemId)
-
+    await supabase.from('checklist_items').update({ checked, reward_earned: 0, count: 0 }).eq('id', itemId)
     const updatedItems = cl.checklist_items.map(i =>
-      i.id === itemId ? { ...i, checked, reward_earned: reward } : i
+      i.id === itemId ? { ...i, checked, reward_earned: 0, count: 0 } : i
     )
     const reqItems = updatedItems.filter(i => i.chore_templates?.type === 'required')
     const requiredAll = reqItems.length > 0 && reqItems.every(i => i.checked)
     const baseAmount = requiredAll ? defaultAllowance : 0
     const extraAmount = updatedItems.filter(i => i.chore_templates?.type === 'extra').reduce((s, i) => s + i.reward_earned, 0)
-
     await supabase.from('weekly_checklists').update({ base_amount: baseAmount, extra_amount: extraAmount }).eq('id', cl.id)
+    setChecklists(prev => ({
+      ...prev,
+      [childId]: { ...cl, base_amount: baseAmount, extra_amount: extraAmount, checklist_items: updatedItems } as ChecklistWithItems,
+    }))
+  }
 
+  async function setExtraCount(childId: string, itemId: string, chore: ChoreTemplate, count: number) {
+    const cl = await ensureChecklist(childId)
+    const reward = count * (chore.reward_amount ?? 0)
+    await supabase.from('checklist_items').update({ count, checked: count > 0, reward_earned: reward }).eq('id', itemId)
+    const updatedItems = cl.checklist_items.map(i =>
+      i.id === itemId ? { ...i, count, checked: count > 0, reward_earned: reward } : i
+    )
+    const reqItems = updatedItems.filter(i => i.chore_templates?.type === 'required')
+    const requiredAll = reqItems.length > 0 && reqItems.every(i => i.checked)
+    const baseAmount = requiredAll ? defaultAllowance : 0
+    const extraAmount = updatedItems.filter(i => i.chore_templates?.type === 'extra').reduce((s, i) => s + i.reward_earned, 0)
+    await supabase.from('weekly_checklists').update({ base_amount: baseAmount, extra_amount: extraAmount }).eq('id', cl.id)
     setChecklists(prev => ({
       ...prev,
       [childId]: { ...cl, base_amount: baseAmount, extra_amount: extraAmount, checklist_items: updatedItems } as ChecklistWithItems,
@@ -372,8 +386,14 @@ export default function ChildrenPage() {
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error)
+      if (addChores.length > 0) {
+        await supabase.from('chore_assignments').insert(
+          addChores.map(choreId => ({ child_id: json.childId, chore_id: choreId }))
+        )
+      }
       setMsg('Child account created!')
       setAddForm({ name: '', email: '', password: '', starting_balance: '' })
+      setAddChores([])
       setShowAdd(false)
       load()
     } catch (e: unknown) {
@@ -431,11 +451,55 @@ export default function ChildrenPage() {
                 value={addForm.starting_balance} onChange={e => setAddForm(f => ({ ...f, starting_balance: e.target.value }))} />
             </div>
           </div>
+          {/* Chore assignment */}
+          {chores.length > 0 && (
+            <div style={{ marginTop: '1.25rem', borderTop: '1px solid #f1f5f9', paddingTop: '1.25rem' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: '0.75rem' }}>Assign Chores</div>
+              {(['required', 'extra'] as const).map(type => {
+                const group = chores.filter(c => c.type === type)
+                if (group.length === 0) return null
+                return (
+                  <div key={type} style={{ marginBottom: '0.75rem' }}>
+                    <div style={{ fontSize: '0.75rem', fontWeight: 700, color: type === 'required' ? '#1d4ed8' : '#d97706', marginBottom: '0.4rem', textTransform: 'uppercase' }}>
+                      {type === 'required' ? 'Part 1 — Required' : 'Part 2 — Extra Rewards'}
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                      {group.map(chore => (
+                        <label key={chore.id} style={{
+                          display: 'flex', alignItems: 'center', gap: '0.4rem',
+                          padding: '0.35rem 0.75rem',
+                          background: addChores.includes(chore.id) ? (type === 'required' ? '#dbeafe' : '#fef3c7') : '#f8fafc',
+                          border: `1px solid ${addChores.includes(chore.id) ? (type === 'required' ? '#93c5fd' : '#fde68a') : '#e2e8f0'}`,
+                          borderRadius: '999px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 500,
+                          color: addChores.includes(chore.id) ? (type === 'required' ? '#1d4ed8' : '#d97706') : '#64748b',
+                          transition: 'all 0.15s',
+                        }}>
+                          <input
+                            type="checkbox"
+                            checked={addChores.includes(chore.id)}
+                            onChange={e => setAddChores(prev =>
+                              e.target.checked ? [...prev, chore.id] : prev.filter(id => id !== chore.id)
+                            )}
+                            style={{ accentColor: type === 'required' ? '#1d4ed8' : '#d97706', cursor: 'pointer' }}
+                          />
+                          {chore.name}{type === 'extra' ? ` (+${formatMoney(chore.reward_amount ?? 0)})` : ''}
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })}
+              <p style={{ fontSize: '0.78rem', color: '#94a3b8', margin: '0.5rem 0 0' }}>
+                If none selected, all active chores will be assigned.
+              </p>
+            </div>
+          )}
+
           <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
             <button className="btn-primary" onClick={addChild} disabled={addingSaving}>
               {addingSaving ? 'Creating...' : 'Create Account'}
             </button>
-            <button className="btn-secondary" onClick={() => setShowAdd(false)}>Cancel</button>
+            <button className="btn-secondary" onClick={() => { setShowAdd(false); setAddChores([]) }}>Cancel</button>
           </div>
         </div>
       )}
@@ -644,26 +708,42 @@ export default function ChildrenPage() {
                             {extraItems.map(item => {
                               const chore = item.chore_templates
                               if (!chore) return null
+                              const count = item.count ?? 0
+                              const earned = count * (chore.reward_amount ?? 0)
                               return (
-                                <label key={item.id} style={{
+                                <div key={item.id} style={{
                                   display: 'flex', alignItems: 'center', gap: '0.75rem',
                                   padding: '0.625rem 0.875rem',
-                                  background: item.checked ? '#fffbeb' : '#f8fafc',
-                                  borderRadius: '0.625rem', cursor: 'pointer',
-                                  border: `1px solid ${item.checked ? '#fde68a' : '#e2e8f0'}`,
+                                  background: count > 0 ? '#fffbeb' : '#f8fafc',
+                                  borderRadius: '0.625rem',
+                                  border: `1px solid ${count > 0 ? '#fde68a' : '#e2e8f0'}`,
                                   transition: 'all 0.15s',
                                 }}>
-                                  <input type="checkbox" checked={item.checked}
-                                    onChange={e => toggleItem(child.id, item.id, chore, e.target.checked)}
-                                    style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#d97706' }} />
                                   <span style={{ fontWeight: 500, flex: 1 }}>{chore.name}</span>
+                                  <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{formatMoney(chore.reward_amount ?? 0)}/session ×</span>
+                                  <select
+                                    value={count}
+                                    onChange={e => setExtraCount(child.id, item.id, chore, parseInt(e.target.value))}
+                                    style={{
+                                      border: '1px solid #e2e8f0', borderRadius: '0.5rem',
+                                      padding: '0.2rem 0.4rem', fontSize: '0.9rem',
+                                      fontWeight: 700, cursor: 'pointer',
+                                      background: count > 0 ? '#fef3c7' : '#f8fafc',
+                                      color: count > 0 ? '#d97706' : '#64748b',
+                                    }}
+                                  >
+                                    {Array.from({length: 16}, (_, n) => (
+                                      <option key={n} value={n}>{n}</option>
+                                    ))}
+                                  </select>
                                   <span style={{
-                                    background: item.checked ? '#fef3c7' : '#f1f5f9',
-                                    color: item.checked ? '#d97706' : '#94a3b8',
+                                    background: count > 0 ? '#fef3c7' : '#f1f5f9',
+                                    color: count > 0 ? '#d97706' : '#94a3b8',
                                     fontSize: '0.85rem', fontWeight: 700,
                                     padding: '0.2rem 0.6rem', borderRadius: '999px',
-                                  }}>+{formatMoney(chore.reward_amount ?? 0)}</span>
-                                </label>
+                                    minWidth: '3rem', textAlign: 'right',
+                                  }}>+{formatMoney(earned)}</span>
+                                </div>
                               )
                             })}
                           </div>
