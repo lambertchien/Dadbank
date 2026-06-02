@@ -129,6 +129,22 @@ export default function SettingsPage() {
   }
 
   async function deleteChore(id: string) {
+    const isAssigned = Object.values(assignments).some(ids => ids.includes(id))
+    if (isAssigned) {
+      setWarnMsg('This task is assigned to children. Remove all assignments first before deleting.')
+      setTimeout(() => setWarnMsg(''), 5000)
+      return
+    }
+    const { count: sessionCount } = await supabase
+      .from('extra_task_logs')
+      .select('id', { count: 'exact', head: true })
+      .eq('chore_id', id)
+      .eq('week_start', getThisSaturday())
+    if ((sessionCount ?? 0) > 0) {
+      setWarnMsg(`Can't delete — ${sessionCount} session(s) logged this week. Clear all session records first.`)
+      setTimeout(() => setWarnMsg(''), 5000)
+      return
+    }
     const { error } = await supabase.from('chore_templates').delete().eq('id', id)
     if (error) {
       setWarnMsg('This task has historical records and cannot be deleted. Deactivate it instead.')
