@@ -149,9 +149,11 @@ export default function SettingsPage() {
       setTimeout(() => setWarnMsg(''), 5000)
       return
     }
+    // Clean up historical checklist_items first (financial transactions are already recorded)
+    await supabase.from('checklist_items').delete().eq('chore_id', id)
     const { error } = await supabase.from('chore_templates').delete().eq('id', id)
     if (error) {
-      setWarnMsg('This task has historical records and cannot be fully deleted. Use the "Disable" button on this task row to hide it from future checklists.')
+      setWarnMsg('Unable to delete this task. Try disabling it instead.')
       setTimeout(() => setWarnMsg(''), 5000)
       return
     }
