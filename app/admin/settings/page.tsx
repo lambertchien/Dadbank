@@ -16,6 +16,7 @@ export default function SettingsPage() {
   const [newCategory, setNewCategory] = useState('')
   const [saving, setSaving] = useState('')
   const [msg, setMsg] = useState('')
+  const [warnMsg, setWarnMsg] = useState('')
   const [editingReward, setEditingReward] = useState<Record<string, string>>({})
 
   const [newPassword, setNewPassword] = useState('')
@@ -111,6 +112,18 @@ export default function SettingsPage() {
   }
 
   async function toggleChore(id: string, active: boolean) {
+    if (!active) {
+      const { count } = await supabase
+        .from('extra_task_logs')
+        .select('id', { count: 'exact', head: true })
+        .eq('chore_id', id)
+        .eq('week_start', getThisSaturday())
+      if ((count ?? 0) > 0) {
+        setWarnMsg(`Can't disable — ${count} session(s) logged by children this week. Clear all session records first.`)
+        setTimeout(() => setWarnMsg(''), 5000)
+        return
+      }
+    }
     await supabase.from('chore_templates').update({ active }).eq('id', id)
     setChores(prev => prev.map(c => c.id === id ? { ...c, active } : c))
   }
@@ -142,16 +155,27 @@ export default function SettingsPage() {
       await supabase.from('chore_assignments').insert({ chore_id: choreId, child_id: childId })
       setAssignments(prev => ({ ...prev, [childId]: [...(prev[childId] ?? []), choreId] }))
     } else {
-      const { count } = await supabase
-        .from('extra_task_logs')
-        .select('id', { count: 'exact', head: true })
+      // Block only if the checklist_item still has count > 0 (admin hasn't zeroed it yet)
+      const weekStart = getThisSaturday()
+      const { data: cl } = await supabase
+        .from('weekly_checklists')
+        .select('id')
         .eq('child_id', childId)
-        .eq('chore_id', choreId)
-        .eq('week_start', getThisSaturday())
-      if ((count ?? 0) > 0) {
-        setMsg(`Can't remove — ${count} session(s) logged this week. Set the count to 0 in the checklist first.`)
-        setTimeout(() => setMsg(''), 4000)
-        return
+        .eq('week_start', weekStart)
+        .neq('status', 'approved')
+        .maybeSingle()
+      if (cl) {
+        const { data: item } = await supabase
+          .from('checklist_items')
+          .select('count')
+          .eq('checklist_id', cl.id)
+          .eq('chore_id', choreId)
+          .maybeSingle()
+        if ((item?.count ?? 0) > 0) {
+          setWarnMsg(`Can't remove — this task still has sessions counted in the checklist. Set the count to 0 in the checklist first, then come back to remove.`)
+          setTimeout(() => setWarnMsg(''), 5000)
+          return
+        }
       }
       await supabase.from('chore_assignments').delete().eq('chore_id', choreId).eq('child_id', childId)
       setAssignments(prev => ({ ...prev, [childId]: (prev[childId] ?? []).filter(id => id !== choreId) }))
@@ -189,6 +213,11 @@ export default function SettingsPage() {
       {msg && (
         <div style={{ background: '#dcfce7', color: '#15803d', padding: '0.75rem 1rem', borderRadius: '0.75rem', fontSize: '0.875rem' }}>
           {msg}
+        </div>
+      )}
+      {warnMsg && (
+        <div style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '0.75rem 1rem', borderRadius: '0.75rem', fontSize: '0.875rem', fontWeight: 500 }}>
+          ⚠️ {warnMsg}
         </div>
       )}
 

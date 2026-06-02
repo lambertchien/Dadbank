@@ -156,6 +156,7 @@ export default function ChildrenPage() {
       let extraDirty = false
       for (const item of checklist.checklist_items) {
         if (item.chore_templates?.type !== 'extra') continue
+        if (item.admin_adjusted) continue  // admin has explicitly set this count — don't overwrite
         const logCount = logMap[`${checklist.child_id}-${item.chore_id}`]?.length ?? 0
         if (item.count !== logCount) {
           const reward = logCount * ((item.chore_templates?.reward_amount) ?? (choreMap[item.chore_id]?.reward_amount) ?? 0)
@@ -214,6 +215,7 @@ export default function ChildrenPage() {
     let dirty = false
     for (const item of items) {
       if (item.chore_templates?.type !== 'extra') continue
+      if (item.admin_adjusted) continue
       const logCount = taskLogs[`${childId}-${item.chore_id}`]?.length ?? 0
       if (logCount > 0 && item.count !== logCount) {
         const reward = logCount * (item.chore_templates.reward_amount ?? 0)
@@ -316,7 +318,7 @@ export default function ChildrenPage() {
   async function setExtraCount(childId: string, itemId: string, chore: ChoreTemplate, count: number) {
     const cl = await ensureChecklist(childId)
     const reward = count * (chore.reward_amount ?? 0)
-    await supabase.from('checklist_items').update({ count, checked: count > 0, reward_earned: reward }).eq('id', itemId)
+    await supabase.from('checklist_items').update({ count, checked: count > 0, reward_earned: reward, admin_adjusted: true }).eq('id', itemId)
     const updatedItems = cl.checklist_items.map(i =>
       i.id === itemId ? { ...i, count, checked: count > 0, reward_earned: reward } : i
     )

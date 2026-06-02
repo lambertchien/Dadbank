@@ -69,6 +69,7 @@ export interface ChecklistItem {
   checked: boolean
   count: number
   reward_earned: number
+  admin_adjusted: boolean
   chore_templates?: ChoreTemplate
 }
 
