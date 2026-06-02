@@ -15,13 +15,13 @@ export async function GET(req: Request) {
     { auth: { autoRefreshToken: false, persistSession: false } }
   )
 
-  const { data: settings } = await supabase
-    .from('app_settings')
-    .select('value')
-    .eq('key', 'interest_rate')
-    .single()
+  const [{ data: rateSettings }, { data: titheSettings }] = await Promise.all([
+    supabase.from('app_settings').select('value').eq('key', 'interest_rate').single(),
+    supabase.from('app_settings').select('value').eq('key', 'tithe_percentage').single(),
+  ])
 
-  const rate = parseFloat(settings?.value ?? '1') / 100
+  const rate = parseFloat(rateSettings?.value ?? '1') / 100
+  const tithePct = parseFloat(titheSettings?.value ?? '10')
 
   const { data: children } = await supabase
     .from('profiles')
@@ -36,10 +36,14 @@ export async function GET(req: Request) {
     const interest = Math.ceil(child.balance * rate)
     if (interest <= 0) continue
 
-    await supabase.from('transactions').insert({
+    // Create a pending tithe record — interest is NOT deposited until child decides their tithe
+    await supabase.from('tithe_records').insert({
       child_id: child.id,
-      amount: interest,
-      type: 'interest',
+      checklist_id: null,
+      income_amount: interest,
+      tithe_amount: Math.ceil(interest * tithePct / 100),
+      tithe_percentage: tithePct,
+      completed: false,
       description: `Monthly interest (${(rate * 100).toFixed(1)}%) — ${month}`,
     })
 

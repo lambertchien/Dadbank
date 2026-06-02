@@ -35,12 +35,16 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'Tithe cannot exceed your allowance' }, { status: 400 })
   }
 
-  // Insert allowance or deposit transaction (full income)
+  const isInterest = !record.checklist_id && record.description?.toLowerCase().includes('interest')
+  const txType = record.checklist_id ? 'allowance' : (isInterest ? 'interest' : 'deposit')
+  const txDesc = record.checklist_id ? 'Weekly allowance' : (record.description || 'Admin deposit')
+
+  // Insert allowance, interest, or deposit transaction (full income)
   await serviceSupabase.from('transactions').insert({
     child_id: user.id,
     amount: record.income_amount,
-    type: record.checklist_id ? 'allowance' : 'deposit',
-    description: record.checklist_id ? 'Weekly allowance' : (record.description || 'Admin deposit'),
+    type: txType,
+    description: txDesc,
     reference_id: record.checklist_id ?? record.id,
     created_by: user.id,
   })

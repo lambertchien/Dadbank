@@ -23,21 +23,26 @@ interface TitheRecord {
   tithe_amount: number
   tithe_percentage: number
   completed: boolean
-  checklist_id: string
+  checklist_id: string | null
+  description: string | null
+}
+
+interface TitheCardState {
+  input: string
+  pct: number
+  submitting: boolean
+  baseAmount: number  // allowance/interest portion shown in breakdown
 }
 
 export default function DashboardPage() {
   const supabase = createClient()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [transactions, setTransactions] = useState<Transaction[]>([])
-  const [pendingTithe, setPendingTithe] = useState<TitheRecord | null>(null)
-  const [titheInput, setTitheInput] = useState('')
-  const [tithePct, setTithePct] = useState(10)
+  const [pendingTithes, setPendingTithes] = useState<TitheRecord[]>([])
+  const [titheStates, setTitheStates] = useState<Record<string, TitheCardState>>({})
   const [defaultTithePct, setDefaultTithePct] = useState(10)
-  const [submittingTithe, setSubmittingTithe] = useState(false)
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
-  const [allowanceAmount, setAllowanceAmount] = useState(0)
   const [filterType, setFilterType] = useState('')
   const [timeSpan, setTimeSpan] = useState(0)
 
@@ -45,84 +50,87 @@ export default function DashboardPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    const [{ data: p }, { data: tx }, { data: tithe }, { data: settings }] = await Promise.all([
+    const [{ data: p }, { data: tx }, { data: tithes }, { data: settings }] = await Promise.all([
       supabase.from('profiles').select('*').eq('id', user.id).single(),
       supabase.from('transactions').select('*').eq('child_id', user.id).order('created_at', { ascending: false }).limit(200),
-      supabase.from('tithe_records').select('*').eq('child_id', user.id).eq('completed', false).order('created_at', { ascending: false }).limit(1),
+      supabase.from('tithe_records').select('*').eq('child_id', user.id).eq('completed', false).order('created_at', { ascending: true }),
       supabase.from('app_settings').select('value').eq('key', 'tithe_percentage').single(),
     ])
 
     setProfile(p)
     setTransactions(tx ?? [])
-    const t = tithe?.[0] ?? null
-    setPendingTithe(t)
     const pct = parseFloat(settings?.value ?? '10')
     setDefaultTithePct(pct)
-    if (t) {
-      setTitheInput(String(Math.ceil(t.tithe_amount)))
-      setTithePct(t.tithe_percentage)
-      // Get allowance portion from linked checklist
+
+    const records = (tithes ?? []) as TitheRecord[]
+    setPendingTithes(records)
+
+    // Build per-card state, fetching checklist breakdowns in parallel
+    const states: Record<string, TitheCardState> = {}
+    await Promise.all(records.map(async (t) => {
+      let baseAmount = t.income_amount
       if (t.checklist_id) {
         const { data: cl } = await supabase
           .from('weekly_checklists')
           .select('base_amount, extra_amount')
           .eq('id', t.checklist_id)
           .single()
-        setAllowanceAmount(cl ? (cl.base_amount + cl.extra_amount) : t.income_amount)
-      } else {
-        setAllowanceAmount(t.income_amount)
+        if (cl) baseAmount = cl.base_amount + cl.extra_amount
       }
-    }
+      states[t.id] = {
+        input: String(Math.ceil(t.tithe_amount)),
+        pct: t.tithe_percentage,
+        submitting: false,
+        baseAmount,
+      }
+    }))
+    setTitheStates(states)
+
     setLoading(false)
   }, [supabase])
 
   useEffect(() => { load() }, [load])
 
-  function handleTitheAmountChange(val: string) {
-    setTitheInput(val)
-    if (pendingTithe && val) {
-      const amt = parseFloat(val)
-      const pct = (amt / pendingTithe.income_amount) * 100
-      setTithePct(Math.ceil(pct * 10) / 10)
-    }
+  function updateTitheInput(record: TitheRecord, val: string) {
+    const amt = parseFloat(val)
+    const newPct = val && !isNaN(amt) ? Math.ceil((amt / record.income_amount) * 100 * 10) / 10 : titheStates[record.id]?.pct ?? defaultTithePct
+    setTitheStates(prev => ({ ...prev, [record.id]: { ...prev[record.id], input: val, pct: newPct } }))
   }
 
-  function handleTithePctChange(val: number) {
-    setTithePct(val)
-    if (pendingTithe) {
-      const amt = String(Math.ceil(pendingTithe.income_amount * val / 100))
-      setTitheInput(amt)
-    }
+  function updateTithePct(record: TitheRecord, val: number) {
+    const amt = String(Math.ceil(record.income_amount * val / 100))
+    setTitheStates(prev => ({ ...prev, [record.id]: { ...prev[record.id], pct: val, input: amt } }))
   }
 
-  async function submitTithe() {
-    if (!pendingTithe || !profile) return
-    const amount = parseFloat(titheInput)
-    if (isNaN(amount) || amount < (pendingTithe.income_amount * defaultTithePct / 100)) {
-      setMsg(`Tithe must be at least ${defaultTithePct}% (${formatMoney(pendingTithe.income_amount * defaultTithePct / 100)})`)
+  async function submitTithe(record: TitheRecord) {
+    const state = titheStates[record.id]
+    if (!state || !profile) return
+    const amount = parseFloat(state.input)
+    const minTithe = record.income_amount * defaultTithePct / 100
+    if (isNaN(amount) || amount < minTithe) {
+      setMsg(`Tithe must be at least ${defaultTithePct}% (${formatMoney(minTithe)})`)
       return
     }
 
-    setSubmittingTithe(true)
-    const net = Math.ceil(pendingTithe.income_amount - amount)
+    setTitheStates(prev => ({ ...prev, [record.id]: { ...prev[record.id], submitting: true } }))
 
     const res = await fetch('/api/tithe/submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ titheRecordId: pendingTithe.id, titheAmount: amount, tithePct }),
+      body: JSON.stringify({ titheRecordId: record.id, titheAmount: amount, tithePct: state.pct }),
     })
 
     if (!res.ok) {
       const json = await res.json()
       setMsg(json.error ?? 'Something went wrong')
-      setSubmittingTithe(false)
+      setTitheStates(prev => ({ ...prev, [record.id]: { ...prev[record.id], submitting: false } }))
       return
     }
 
+    const net = Math.ceil(record.income_amount - amount)
     setMsg(`Tithe given! ${formatMoney(net)} added to your savings. Well done! 🎉`)
-    setPendingTithe(null)
+    setPendingTithes(prev => prev.filter(t => t.id !== record.id))
     load()
-    setSubmittingTithe(false)
     setTimeout(() => setMsg(''), 3000)
   }
 
@@ -131,10 +139,6 @@ export default function DashboardPage() {
       Loading your account...
     </div>
   )
-
-  const minTithe = pendingTithe ? pendingTithe.income_amount * defaultTithePct / 100 : 0
-  const titheAmount = parseFloat(titheInput) || 0
-  const titheValid = titheAmount >= minTithe
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
@@ -156,112 +160,112 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Tithe box — shown when there's a pending tithe */}
-      {pendingTithe && (
-        <div style={{
-          background: 'white',
-          borderRadius: '1.25rem',
-          padding: '1.5rem',
-          border: '2px solid #c4b5fd',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
-            <span style={{ fontSize: '1.5rem' }}>🙏</span>
-            <div>
-              <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{pendingTithe.checklist_id ? 'Allowance Ready!' : 'Deposit Ready!'}</div>
-              <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
-                Decide your tithe to receive your money
-              </div>
-            </div>
-          </div>
+      {/* Tithe cards — one per pending tithe record */}
+      {pendingTithes.map(record => {
+        const state = titheStates[record.id]
+        if (!state) return null
+        const minTithe = record.income_amount * defaultTithePct / 100
+        const titheAmount = parseFloat(state.input) || 0
+        const titheValid = titheAmount >= minTithe
+        const isInterest = !record.checklist_id && record.description?.toLowerCase().includes('interest')
+        const cardTitle = record.checklist_id ? 'Allowance Ready!' : (isInterest ? 'Interest Ready!' : 'Deposit Ready!')
+        const incomeLabel = record.checklist_id ? 'Allowance' : (isInterest ? 'Interest' : 'Deposit')
 
-          {/* Income breakdown */}
-          <div style={{
-            background: '#f8fafc', borderRadius: '0.75rem', padding: '0.875rem', marginBottom: '1.25rem',
+        return (
+          <div key={record.id} style={{
+            background: 'white',
+            borderRadius: '1.25rem',
+            padding: '1.5rem',
+            border: '2px solid #c4b5fd',
           }}>
-            <div style={{ display: 'flex', gap: '1rem' }}>
-              <div style={{ flex: 1, textAlign: 'center' }}>
-                <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>{pendingTithe.checklist_id ? 'Allowance' : 'Deposit'}</div>
-                <div style={{ fontWeight: 700, color: '#1e293b', fontSize: '1.1rem' }}>{formatMoney(allowanceAmount)}</div>
-              </div>
-              {pendingTithe.income_amount > allowanceAmount && (
-                <div style={{ flex: 1, textAlign: 'center' }}>
-                  <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Interest</div>
-                  <div style={{ fontWeight: 700, color: '#2563eb', fontSize: '1.1rem' }}>+{formatMoney(pendingTithe.income_amount - allowanceAmount)}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem' }}>
+              <span style={{ fontSize: '1.5rem' }}>🙏</span>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{cardTitle}</div>
+                <div style={{ fontSize: '0.8rem', color: '#64748b' }}>
+                  {record.description ?? 'Decide your tithe to receive your money'}
                 </div>
-              )}
-              <div style={{ flex: 1, textAlign: 'center' }}>
-                <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Tithe Base</div>
-                <div style={{ fontWeight: 700, color: '#7c3aed', fontSize: '1.1rem' }}>{formatMoney(pendingTithe.income_amount)}</div>
-              </div>
-              <div style={{ flex: 1, textAlign: 'center' }}>
-                <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>You Keep</div>
-                <div style={{ fontWeight: 700, color: '#16a34a', fontSize: '1.1rem' }}>{formatMoney(Math.max(0, pendingTithe.income_amount - titheAmount))}</div>
               </div>
             </div>
-            {pendingTithe.income_amount > allowanceAmount && (
-              <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.5rem', textAlign: 'center' }}>
-                Interest earned this month is included in your tithe base
-              </div>
-            )}
-          </div>
 
-          {/* Tithe bar */}
-          <div style={{ marginBottom: '1rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
-              <span style={{ fontWeight: 700, color: '#7c3aed', fontSize: '1rem' }}>{formatMoney(titheAmount)}</span>
-              <span style={{ fontWeight: 600, color: '#7c3aed', fontSize: '0.875rem' }}>{tithePct.toFixed(1)}%</span>
+            {/* Income breakdown */}
+            <div style={{
+              background: '#f8fafc', borderRadius: '0.75rem', padding: '0.875rem', marginBottom: '1.25rem',
+            }}>
+              <div style={{ display: 'flex', gap: '1rem' }}>
+                <div style={{ flex: 1, textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>{incomeLabel}</div>
+                  <div style={{ fontWeight: 700, color: '#1e293b', fontSize: '1.1rem' }}>{formatMoney(state.baseAmount)}</div>
+                </div>
+                <div style={{ flex: 1, textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>Tithe Base</div>
+                  <div style={{ fontWeight: 700, color: '#7c3aed', fontSize: '1.1rem' }}>{formatMoney(record.income_amount)}</div>
+                </div>
+                <div style={{ flex: 1, textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.72rem', color: '#64748b', fontWeight: 600, textTransform: 'uppercase' }}>You Keep</div>
+                  <div style={{ fontWeight: 700, color: '#16a34a', fontSize: '1.1rem' }}>{formatMoney(Math.max(0, record.income_amount - titheAmount))}</div>
+                </div>
+              </div>
             </div>
-            <div style={{ height: '14px', background: '#f1f5f9', borderRadius: '999px', overflow: 'hidden' }}>
-              <div style={{
-                height: '100%',
-                width: `${Math.min(tithePct, 100)}%`,
-                background: 'linear-gradient(90deg, #7c3aed, #a78bfa)',
-                borderRadius: '999px',
-                transition: 'width 0.2s ease',
-              }} />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', marginTop: '0.3rem' }}>
-              <span style={{ color: '#7c3aed', fontWeight: 600 }}>Min {defaultTithePct}%</span>
-              <span style={{ color: '#94a3b8' }}>100%</span>
-            </div>
-          </div>
 
-          {/* Amount input */}
-          <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-            <div style={{ flex: 1 }}>
-              <label className="label">Tithe Amount ($)</label>
-              <input
-                className="input"
-                type="number"
-                min={Math.ceil(minTithe)}
-                step="1"
-                value={titheInput}
-                onChange={e => handleTitheAmountChange(e.target.value)}
-                style={{ borderColor: titheValid ? '#c4b5fd' : '#fca5a5' }}
-              />
+            {/* Tithe bar */}
+            <div style={{ marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
+                <span style={{ fontWeight: 700, color: '#7c3aed', fontSize: '1rem' }}>{formatMoney(titheAmount)}</span>
+                <span style={{ fontWeight: 600, color: '#7c3aed', fontSize: '0.875rem' }}>{state.pct.toFixed(1)}%</span>
+              </div>
+              <div style={{ height: '14px', background: '#f1f5f9', borderRadius: '999px', overflow: 'hidden' }}>
+                <div style={{
+                  height: '100%',
+                  width: `${Math.min(state.pct, 100)}%`,
+                  background: 'linear-gradient(90deg, #7c3aed, #a78bfa)',
+                  borderRadius: '999px',
+                  transition: 'width 0.2s ease',
+                }} />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', marginTop: '0.3rem' }}>
+                <span style={{ color: '#7c3aed', fontWeight: 600 }}>Min {defaultTithePct}%</span>
+                <span style={{ color: '#94a3b8' }}>100%</span>
+              </div>
             </div>
-            <button
-              onClick={submitTithe}
-              disabled={submittingTithe || !titheValid}
-              style={{
-                marginTop: '1.5rem',
-                background: '#7c3aed',
-                color: 'white',
-                border: 'none',
-                borderRadius: '0.75rem',
-                padding: '0.625rem 1.25rem',
-                fontWeight: 600,
-                cursor: titheValid ? 'pointer' : 'not-allowed',
-                opacity: titheValid ? 1 : 0.5,
-                transition: 'all 0.15s',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {submittingTithe ? 'Submitting...' : 'Give Tithe'}
-            </button>
+
+            {/* Amount input */}
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+              <div style={{ flex: 1 }}>
+                <label className="label">Tithe Amount ($)</label>
+                <input
+                  className="input"
+                  type="number"
+                  min={Math.ceil(minTithe)}
+                  step="1"
+                  value={state.input}
+                  onChange={e => updateTitheInput(record, e.target.value)}
+                  style={{ borderColor: titheValid ? '#c4b5fd' : '#fca5a5' }}
+                />
+              </div>
+              <button
+                onClick={() => submitTithe(record)}
+                disabled={state.submitting || !titheValid}
+                style={{
+                  marginTop: '1.5rem',
+                  background: '#7c3aed',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '0.75rem',
+                  padding: '0.625rem 1.25rem',
+                  fontWeight: 600,
+                  cursor: titheValid ? 'pointer' : 'not-allowed',
+                  opacity: titheValid ? 1 : 0.5,
+                  transition: 'all 0.15s',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {state.submitting ? 'Submitting...' : 'Give Tithe'}
+              </button>
+            </div>
           </div>
-        </div>
-      )}
+        )
+      })}
 
       {msg && (
         <div style={{
@@ -319,7 +323,6 @@ export default function DashboardPage() {
           const sumStyle = filterType ? TX_STYLES[filterType] : null
 
           // Compute running balance: newest tx has balance = current balance
-          // Each older tx: subtract the newer tx's amount
           const currentBalance = profile?.balance ?? 0
           const balanceAfter: number[] = []
           let running = currentBalance
@@ -327,7 +330,6 @@ export default function DashboardPage() {
             balanceAfter[i] = running
             running -= transactions[i].amount
           }
-          // Map filtered tx back to their balanceAfter using index in full list
           const balanceMap = new Map(transactions.map((tx, i) => [tx.id, balanceAfter[i]]))
 
           if (filtered.length === 0) return (

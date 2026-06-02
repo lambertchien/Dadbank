@@ -180,33 +180,11 @@ export default function ChecklistPage() {
       const { data: settings } = await supabase.from('app_settings').select('value').eq('key', 'tithe_percentage').single()
       const pct = parseFloat(settings?.value ?? '10')
 
-      // Add any interest earned since the last completed tithe
-      const { data: lastTithe } = await supabase
-        .from('tithe_records')
-        .select('created_at')
-        .eq('child_id', child.id)
-        .eq('completed', true)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .single()
-
-      const since = lastTithe?.created_at ?? '1970-01-01'
-      const { data: interestTx } = await supabase
-        .from('transactions')
-        .select('amount')
-        .eq('child_id', child.id)
-        .eq('type', 'interest')
-        .gte('created_at', since)
-
-      const interestAccrued = Math.ceil((interestTx ?? []).reduce((s, t) => s + t.amount, 0))
-      const titheBase = total + interestAccrued
-      const titheAmount = Math.ceil(titheBase * pct / 100)
-
       await supabase.from('tithe_records').insert({
         child_id: child.id,
         checklist_id: cl.id,
-        income_amount: titheBase,
-        tithe_amount: titheAmount,
+        income_amount: total,
+        tithe_amount: Math.ceil(total * pct / 100),
         tithe_percentage: pct,
         completed: false,
       })
