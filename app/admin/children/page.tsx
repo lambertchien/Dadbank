@@ -99,8 +99,48 @@ export default function ChildrenPage() {
     setChores(cr ?? [])
     if (settings) setDefaultAllowance(parseFloat(settings.value))
     if (titheSetting) setDefaultTithePct(parseFloat(titheSetting.value))
+    setWithdrawals((wr as WRWithProfile[]) ?? [])
 
-    // Build log map and sync extra counts for pending checklists
+    // Build assignment map first — needed for missing-item detection
+    const asgnMap: Record<string, string[]> = {}
+    for (const a of asgn ?? []) {
+      if (!asgnMap[a.child_id]) asgnMap[a.child_id] = []
+      asgnMap[a.child_id].push(a.chore_id)
+    }
+    setAssignments(asgnMap)
+
+    const choreMap = Object.fromEntries((cr ?? []).map(c => [c.id, c]))
+    const clList = (cl ?? []) as ChecklistWithItems[]
+
+    // Create checklist_items for any assigned chores that are missing from pending checklists
+    const missingInserts: { checklist_id: string; chore_id: string; checked: boolean; reward_earned: number }[] = []
+    const refetchIds = new Set<string>()
+    for (const checklist of clList) {
+      if (checklist.status === 'approved') continue
+      const assigned = asgnMap[checklist.child_id] ?? []
+      if (assigned.length === 0) continue
+      const existingChoreIds = new Set(checklist.checklist_items.map(i => i.chore_id))
+      for (const choreId of assigned) {
+        if (!existingChoreIds.has(choreId)) {
+          missingInserts.push({ checklist_id: checklist.id, chore_id: choreId, checked: false, reward_earned: 0 })
+          refetchIds.add(checklist.id)
+        }
+      }
+    }
+    if (missingInserts.length > 0) {
+      await supabase.from('checklist_items').insert(missingInserts)
+      // Re-fetch affected checklists to get the new items with their chore_templates join
+      await Promise.all([...refetchIds].map(async id => {
+        const { data: refreshed } = await supabase
+          .from('weekly_checklists').select('*, checklist_items(*, chore_templates(*))').eq('id', id).single()
+        if (refreshed) {
+          const idx = clList.findIndex(c => c.id === id)
+          if (idx >= 0) clList[idx] = refreshed as ChecklistWithItems
+        }
+      }))
+    }
+
+    // Build log map
     const logMap: Record<string, LogEntry[]> = {}
     for (const log of logs ?? []) {
       const key = `${log.child_id}-${log.chore_id}`
@@ -109,7 +149,7 @@ export default function ChildrenPage() {
     }
     setTaskLogs(logMap)
 
-    const clList = (cl ?? []) as ChecklistWithItems[]
+    // Sync extra task counts from child logs for all pending checklists
     const syncBatch: PromiseLike<unknown>[] = []
     for (const checklist of clList) {
       if (checklist.status === 'approved') continue
@@ -118,7 +158,7 @@ export default function ChildrenPage() {
         if (item.chore_templates?.type !== 'extra') continue
         const logCount = logMap[`${checklist.child_id}-${item.chore_id}`]?.length ?? 0
         if (item.count !== logCount) {
-          const reward = logCount * (item.chore_templates.reward_amount ?? 0)
+          const reward = logCount * ((item.chore_templates?.reward_amount) ?? (choreMap[item.chore_id]?.reward_amount) ?? 0)
           item.count = logCount
           item.checked = logCount > 0
           item.reward_earned = reward
@@ -137,15 +177,6 @@ export default function ChildrenPage() {
     const clMap: Record<string, ChecklistWithItems> = {}
     for (const c of clList) clMap[c.child_id] = c
     setChecklists(clMap)
-
-    setWithdrawals((wr as WRWithProfile[]) ?? [])
-
-    const asgnMap: Record<string, string[]> = {}
-    for (const a of asgn ?? []) {
-      if (!asgnMap[a.child_id]) asgnMap[a.child_id] = []
-      asgnMap[a.child_id].push(a.chore_id)
-    }
-    setAssignments(asgnMap)
     setCompletedTithes(new Set((titheDone ?? []).map(t => t.checklist_id).filter(Boolean)))
 
     const manualMap: Record<string, ManualTitheRecord[]> = {}

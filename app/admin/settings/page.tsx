@@ -130,11 +130,29 @@ export default function SettingsPage() {
     setTimeout(() => setMsg(''), 2000)
   }
 
+  function getThisSaturday() {
+    const d = new Date()
+    const day = d.getDay()
+    d.setDate(d.getDate() + (day === 6 ? 0 : 6 - day))
+    return d.toISOString().split('T')[0]
+  }
+
   async function toggleAssignment(choreId: string, childId: string, assign: boolean) {
     if (assign) {
       await supabase.from('chore_assignments').insert({ chore_id: choreId, child_id: childId })
       setAssignments(prev => ({ ...prev, [childId]: [...(prev[childId] ?? []), choreId] }))
     } else {
+      const { count } = await supabase
+        .from('extra_task_logs')
+        .select('id', { count: 'exact', head: true })
+        .eq('child_id', childId)
+        .eq('chore_id', choreId)
+        .eq('week_start', getThisSaturday())
+      if ((count ?? 0) > 0) {
+        setMsg(`Can't remove — ${count} session(s) logged this week. Set the count to 0 in the checklist first.`)
+        setTimeout(() => setMsg(''), 4000)
+        return
+      }
       await supabase.from('chore_assignments').delete().eq('chore_id', choreId).eq('child_id', childId)
       setAssignments(prev => ({ ...prev, [childId]: (prev[childId] ?? []).filter(id => id !== choreId) }))
     }
