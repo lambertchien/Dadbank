@@ -8,6 +8,13 @@ function formatMoney(n: number) {
   return '$' + Math.ceil(n).toLocaleString()
 }
 
+function formatDateTime(iso: string) {
+  return new Date(iso).toLocaleString('en-US', {
+    weekday: 'short', month: 'short', day: 'numeric',
+    hour: 'numeric', minute: '2-digit',
+  })
+}
+
 function getThisSaturday() {
   const d = new Date()
   const day = d.getDay()
@@ -17,12 +24,16 @@ function getThisSaturday() {
 }
 
 type ChecklistWithItems = WeeklyChecklist & { checklist_items: (ChecklistItem & { chore_templates: ChoreTemplate })[] }
+interface LogEntry { id: string; logged_at: string }
 
 export default function ChecklistPage() {
   const supabase = createClient()
   const [children, setChildren] = useState<Profile[]>([])
   const [chores, setChores] = useState<ChoreTemplate[]>([])
   const [checklists, setChecklists] = useState<Record<string, ChecklistWithItems>>({})
+  // taskLogs keyed by `${childId}-${choreId}`
+  const [taskLogs, setTaskLogs] = useState<Record<string, LogEntry[]>>({})
+  const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({})
   const [defaultAllowance, setDefaultAllowance] = useState(100)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState<string | null>(null)
@@ -30,18 +41,63 @@ export default function ChecklistPage() {
   const weekStart = getThisSaturday()
 
   const load = useCallback(async () => {
-    const [{ data: ch }, { data: cr }, { data: cl }, { data: settings }] = await Promise.all([
+    const [{ data: ch }, { data: cr }, { data: cl }, { data: settings }, { data: logs }] = await Promise.all([
       supabase.from('profiles').select('*').eq('role', 'child').order('name'),
       supabase.from('chore_templates').select('*').eq('active', true).order('sort_order'),
       supabase.from('weekly_checklists').select('*, checklist_items(*, chore_templates(*))').eq('week_start', weekStart),
       supabase.from('app_settings').select('*').eq('key', 'default_allowance').single(),
+      supabase.from('extra_task_logs').select('id, child_id, chore_id, logged_at').eq('week_start', weekStart).order('logged_at', { ascending: false }),
     ])
+
     setChildren(ch ?? [])
     setChores(cr ?? [])
     if (settings) setDefaultAllowance(parseFloat(settings.value))
 
+    // Build log map keyed by `${childId}-${choreId}`
+    const logMap: Record<string, LogEntry[]> = {}
+    for (const log of logs ?? []) {
+      const key = `${log.child_id}-${log.chore_id}`
+      if (!logMap[key]) logMap[key] = []
+      logMap[key].push({ id: log.id, logged_at: log.logged_at })
+    }
+    setTaskLogs(logMap)
+
+    // Build checklist map, then auto-sync extra counts from logs
+    const clList = (cl ?? []) as ChecklistWithItems[]
+    const syncBatch: PromiseLike<unknown>[] = []
+
+    for (const checklist of clList) {
+      if (checklist.status === 'approved') continue
+      let extraDirty = false
+      for (const item of checklist.checklist_items) {
+        if (item.chore_templates?.type !== 'extra') continue
+        const logCount = logMap[`${checklist.child_id}-${item.chore_id}`]?.length ?? 0
+        if (item.count !== logCount) {
+          const reward = logCount * (item.chore_templates.reward_amount ?? 0)
+          item.count = logCount
+          item.checked = logCount > 0
+          item.reward_earned = reward
+          extraDirty = true
+          syncBatch.push(
+            supabase.from('checklist_items').update({ count: logCount, checked: logCount > 0, reward_earned: reward }).eq('id', item.id).then(() => {})
+          )
+        }
+      }
+      if (extraDirty) {
+        const newExtra = checklist.checklist_items
+          .filter(i => i.chore_templates?.type === 'extra')
+          .reduce((s, i) => s + i.reward_earned, 0)
+        checklist.extra_amount = newExtra
+        syncBatch.push(
+          supabase.from('weekly_checklists').update({ extra_amount: newExtra }).eq('id', checklist.id).then(() => {})
+        )
+      }
+    }
+
+    if (syncBatch.length > 0) await Promise.all(syncBatch)
+
     const clMap: Record<string, ChecklistWithItems> = {}
-    for (const c of cl ?? []) clMap[c.child_id] = c as ChecklistWithItems
+    for (const c of clList) clMap[c.child_id] = c
     setChecklists(clMap)
     setLoading(false)
   }, [supabase, weekStart])
@@ -53,14 +109,12 @@ export default function ChecklistPage() {
     if (loading || children.length === 0 || chores.length === 0) return
     children.forEach(child => {
       const cl = checklists[child.id]
-      // Create if missing, or repopulate items if checklist exists but has no items
       if (!cl || cl.checklist_items.length === 0) ensureChecklist(child.id)
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, children, chores])
 
   async function ensureChecklist(childId: string): Promise<ChecklistWithItems> {
-    // Only use cache if it has items
     if (checklists[childId]?.checklist_items.length > 0) return checklists[childId]
 
     const { data: existing } = await supabase
@@ -71,24 +125,14 @@ export default function ChecklistPage() {
       .single()
 
     if (existing) {
-      // Checklist exists but has no items — populate them
       if ((existing.checklist_items?.length ?? 0) === 0) {
         const activeChores = chores.filter(c => c.active)
         if (activeChores.length > 0) {
           await supabase.from('checklist_items').insert(
-            activeChores.map(c => ({
-              checklist_id: existing.id,
-              chore_id: c.id,
-              checked: false,
-              reward_earned: 0,
-            }))
+            activeChores.map(c => ({ checklist_id: existing.id, chore_id: c.id, checked: false, reward_earned: 0 }))
           )
-          // Reload with items
           const { data: refilled } = await supabase
-            .from('weekly_checklists')
-            .select('*, checklist_items(*, chore_templates(*))')
-            .eq('id', existing.id)
-            .single()
+            .from('weekly_checklists').select('*, checklist_items(*, chore_templates(*))').eq('id', existing.id).single()
           if (refilled) {
             setChecklists(prev => ({ ...prev, [childId]: refilled as ChecklistWithItems }))
             return refilled as ChecklistWithItems
@@ -102,26 +146,17 @@ export default function ChecklistPage() {
     const { data: newCl } = await supabase
       .from('weekly_checklists')
       .insert({ child_id: childId, week_start: weekStart, base_amount: 0, extra_amount: 0 })
-      .select()
-      .single()
+      .select().single()
 
     const activeChores = chores.filter(c => c.active)
     if (activeChores.length > 0) {
       await supabase.from('checklist_items').insert(
-        activeChores.map(c => ({
-          checklist_id: newCl.id,
-          chore_id: c.id,
-          checked: false,
-          reward_earned: 0,
-        }))
+        activeChores.map(c => ({ checklist_id: newCl.id, chore_id: c.id, checked: false, reward_earned: 0 }))
       )
     }
 
     const { data: full } = await supabase
-      .from('weekly_checklists')
-      .select('*, checklist_items(*, chore_templates(*))')
-      .eq('id', newCl.id)
-      .single()
+      .from('weekly_checklists').select('*, checklist_items(*, chore_templates(*))').eq('id', newCl.id).single()
 
     const result = full as ChecklistWithItems
     setChecklists(prev => ({ ...prev, [childId]: result }))
@@ -145,6 +180,7 @@ export default function ChecklistPage() {
   }
 
   async function setExtraCount(childId: string, itemId: string, chore: ChoreTemplate, count: number) {
+    if (count < 0) return
     const cl = await ensureChecklist(childId)
     const reward = count * (chore.reward_amount ?? 0)
     await supabase.from('checklist_items').update({ count, checked: count > 0, reward_earned: reward }).eq('id', itemId)
@@ -268,15 +304,10 @@ export default function ChecklistPage() {
               <>
                 {/* Part 1: Required chores */}
                 <div style={{ marginBottom: '1.5rem' }}>
-                  <div style={{
-                    display: 'flex', alignItems: 'center', gap: '0.5rem',
-                    marginBottom: '0.75rem',
-                  }}>
-                    <span style={{
-                      background: '#dbeafe', color: '#1d4ed8',
-                      fontSize: '0.75rem', fontWeight: 700,
-                      padding: '0.2rem 0.6rem', borderRadius: '999px',
-                    }}>PART 1 — Required</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                    <span style={{ background: '#dbeafe', color: '#1d4ed8', fontSize: '0.75rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px' }}>
+                      PART 1 — Required
+                    </span>
                     <span style={{ fontSize: '0.8rem', color: '#64748b' }}>
                       All checked = {formatMoney(defaultAllowance)} base allowance
                     </span>
@@ -290,8 +321,7 @@ export default function ChecklistPage() {
                           display: 'flex', alignItems: 'center', gap: '0.75rem',
                           padding: '0.75rem 1rem',
                           background: item.checked ? '#f0fdf4' : '#f8fafc',
-                          borderRadius: '0.75rem',
-                          cursor: 'pointer',
+                          borderRadius: '0.75rem', cursor: 'pointer',
                           border: `1px solid ${item.checked ? '#bbf7d0' : '#e2e8f0'}`,
                           transition: 'all 0.15s',
                         }}>
@@ -320,12 +350,10 @@ export default function ChecklistPage() {
                 {/* Part 2: Extra tasks */}
                 <div style={{ marginBottom: '1.5rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                    <span style={{
-                      background: '#fef3c7', color: '#d97706',
-                      fontSize: '0.75rem', fontWeight: 700,
-                      padding: '0.2rem 0.6rem', borderRadius: '999px',
-                    }}>PART 2 — Extra Rewards</span>
-                    <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Optional bonus tasks</span>
+                    <span style={{ background: '#fef3c7', color: '#d97706', fontSize: '0.75rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px' }}>
+                      PART 2 — Extra Rewards
+                    </span>
+                    <span style={{ fontSize: '0.8rem', color: '#64748b' }}>From child records — adjust if needed</span>
                   </div>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
                     {extras.map(chore => {
@@ -333,41 +361,99 @@ export default function ChecklistPage() {
                       if (!item) return null
                       const count = item.count ?? 0
                       const earned = count * (chore.reward_amount ?? 0)
+                      const logKey = `${child.id}-${chore.id}`
+                      const logs = taskLogs[logKey] ?? []
+                      const isExpanded = expandedLogs[logKey] ?? false
+
                       return (
-                        <div key={chore.id} style={{
-                          display: 'flex', alignItems: 'center', gap: '0.75rem',
-                          padding: '0.75rem 1rem',
-                          background: count > 0 ? '#fffbeb' : '#f8fafc',
-                          borderRadius: '0.75rem',
-                          border: `1px solid ${count > 0 ? '#fde68a' : '#e2e8f0'}`,
-                          transition: 'all 0.15s',
-                        }}>
-                          <span style={{ fontWeight: 500, flex: 1 }}>{chore.name}</span>
-                          <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>{formatMoney(chore.reward_amount ?? 0)}/session ×</span>
-                          <select
-                            value={count}
-                            onChange={e => setExtraCount(child.id, item.id, chore, parseInt(e.target.value))}
-                            style={{
-                              border: '1px solid #e2e8f0', borderRadius: '0.5rem',
-                              padding: '0.25rem 0.5rem', fontSize: '0.9rem',
-                              fontWeight: 700, cursor: 'pointer',
-                              background: count > 0 ? '#fef3c7' : '#f8fafc',
-                              color: count > 0 ? '#d97706' : '#64748b',
-                            }}
-                          >
-                            {Array.from({length: 16}, (_, n) => (
-                              <option key={n} value={n}>{n}</option>
-                            ))}
-                          </select>
-                          <span style={{
-                            background: count > 0 ? '#fef3c7' : '#f1f5f9',
-                            color: count > 0 ? '#d97706' : '#94a3b8',
-                            fontSize: '0.85rem', fontWeight: 700,
-                            padding: '0.2rem 0.6rem', borderRadius: '999px',
-                            minWidth: '3.5rem', textAlign: 'right',
+                        <div key={chore.id} style={{ border: `1px solid ${count > 0 ? '#fde68a' : '#e2e8f0'}`, borderRadius: '0.75rem', overflow: 'hidden' }}>
+                          {/* Main row */}
+                          <div style={{
+                            display: 'flex', alignItems: 'center', gap: '0.75rem',
+                            padding: '0.75rem 1rem',
+                            background: count > 0 ? '#fffbeb' : '#f8fafc',
                           }}>
-                            +{formatMoney(earned)}
-                          </span>
+                            <span style={{ fontWeight: 500, flex: 1, fontSize: '0.925rem' }}>{chore.name}</span>
+                            <span style={{ fontSize: '0.78rem', color: '#94a3b8', flexShrink: 0 }}>{formatMoney(chore.reward_amount ?? 0)}/session</span>
+
+                            {/* Log count badge — click to view records */}
+                            <button
+                              onClick={() => setExpandedLogs(prev => ({ ...prev, [logKey]: !isExpanded }))}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: '0.3rem',
+                                background: logs.length > 0 ? '#e0f2fe' : '#f1f5f9',
+                                color: logs.length > 0 ? '#0369a1' : '#94a3b8',
+                                border: 'none', borderRadius: '999px',
+                                padding: '0.25rem 0.625rem',
+                                fontSize: '0.75rem', fontWeight: 600,
+                                cursor: 'pointer', flexShrink: 0,
+                              }}
+                              title="View child's session records"
+                            >
+                              📱 {logs.length} <span style={{ fontSize: '0.6rem' }}>{isExpanded ? '▲' : '▼'}</span>
+                            </button>
+
+                            {/* +/- count controls */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}>
+                              <button
+                                onClick={() => setExtraCount(child.id, item.id, chore, count - 1)}
+                                disabled={count === 0}
+                                style={{
+                                  width: '28px', height: '28px', borderRadius: '50%',
+                                  border: '1.5px solid #e2e8f0', background: 'white',
+                                  fontSize: '1rem', fontWeight: 700, cursor: count === 0 ? 'not-allowed' : 'pointer',
+                                  opacity: count === 0 ? 0.35 : 1, color: '#374151',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }}
+                              >−</button>
+                              <span style={{
+                                minWidth: '1.75rem', textAlign: 'center',
+                                fontWeight: 700, fontSize: '1rem',
+                                color: count > 0 ? '#d97706' : '#94a3b8',
+                              }}>{count}</span>
+                              <button
+                                onClick={() => setExtraCount(child.id, item.id, chore, count + 1)}
+                                style={{
+                                  width: '28px', height: '28px', borderRadius: '50%',
+                                  border: '1.5px solid #e2e8f0', background: 'white',
+                                  fontSize: '1rem', fontWeight: 700, cursor: 'pointer', color: '#374151',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                }}
+                              >+</button>
+                            </div>
+
+                            {/* Earned amount */}
+                            <span style={{
+                              background: count > 0 ? '#fef3c7' : '#f1f5f9',
+                              color: count > 0 ? '#d97706' : '#94a3b8',
+                              fontSize: '0.85rem', fontWeight: 700,
+                              padding: '0.2rem 0.6rem', borderRadius: '999px',
+                              minWidth: '3.5rem', textAlign: 'right', flexShrink: 0,
+                            }}>
+                              +{formatMoney(earned)}
+                            </span>
+                          </div>
+
+                          {/* Expandable session log */}
+                          {isExpanded && (
+                            <div style={{ borderTop: '1px solid #e2e8f0', background: 'white' }}>
+                              {logs.length === 0 ? (
+                                <div style={{ padding: '0.625rem 1rem', fontSize: '0.8rem', color: '#94a3b8' }}>
+                                  No sessions recorded by child this week.
+                                </div>
+                              ) : (
+                                logs.map((log, i) => (
+                                  <div key={log.id} style={{
+                                    padding: '0.4rem 1rem',
+                                    borderBottom: i < logs.length - 1 ? '1px solid #f8fafc' : 'none',
+                                    fontSize: '0.78rem', color: '#64748b',
+                                  }}>
+                                    Session {logs.length - i} · {formatDateTime(log.logged_at)}
+                                  </div>
+                                ))
+                              )}
+                            </div>
+                          )}
                         </div>
                       )
                     })}

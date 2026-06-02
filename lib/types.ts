@@ -36,7 +36,16 @@ export interface ChoreTemplate {
   type: 'required' | 'extra'
   reward_amount: number | null
   active: boolean
+  sort_order: number
   created_at: string
+}
+
+export interface ExtraTaskLog {
+  id: string
+  child_id: string
+  chore_id: string
+  week_start: string
+  logged_at: string
 }
 
 export interface WeeklyChecklist {

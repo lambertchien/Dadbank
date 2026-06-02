@@ -248,3 +248,21 @@ $$;
 create trigger trg_update_balance
   after insert on public.transactions
   for each row execute function public.update_balance_on_transaction();
+
+-- ── Extra task logs (child self-reported sessions) ────────────
+create table if not exists public.extra_task_logs (
+  id         uuid primary key default gen_random_uuid(),
+  child_id   uuid not null references public.profiles(id) on delete cascade,
+  chore_id   uuid not null references public.chore_templates(id) on delete cascade,
+  week_start date not null,
+  logged_at  timestamptz default now()
+);
+alter table public.extra_task_logs enable row level security;
+
+create policy "children can manage own logs" on public.extra_task_logs
+  for all using (auth.uid() = child_id);
+
+create policy "admins can read all logs" on public.extra_task_logs
+  for select using (
+    exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  );
