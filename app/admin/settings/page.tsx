@@ -129,7 +129,12 @@ export default function SettingsPage() {
   }
 
   async function deleteChore(id: string) {
-    await supabase.from('chore_templates').delete().eq('id', id)
+    const { error } = await supabase.from('chore_templates').delete().eq('id', id)
+    if (error) {
+      setWarnMsg('This task has historical records and cannot be deleted. Deactivate it instead.')
+      setTimeout(() => setWarnMsg(''), 5000)
+      return
+    }
     setChores(prev => prev.filter(c => c.id !== id))
   }
 
@@ -216,7 +221,15 @@ export default function SettingsPage() {
         </div>
       )}
       {warnMsg && (
-        <div style={{ background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa', padding: '0.75rem 1rem', borderRadius: '0.75rem', fontSize: '0.875rem', fontWeight: 500 }}>
+        <div style={{
+          position: 'fixed', top: '1rem', left: '50%', transform: 'translateX(-50%)',
+          zIndex: 1000, maxWidth: '480px', width: 'calc(100% - 2rem)',
+          background: '#fff7ed', color: '#c2410c', border: '1px solid #fed7aa',
+          padding: '0.875rem 1.25rem', borderRadius: '0.875rem',
+          fontSize: '0.875rem', fontWeight: 500,
+          boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+          textAlign: 'center',
+        }}>
           ⚠️ {warnMsg}
         </div>
       )}
