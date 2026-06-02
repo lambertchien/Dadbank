@@ -24,6 +24,12 @@ export default function SettingsPage() {
   const [pwMsg, setPwMsg] = useState('')
   const [pwMsgOk, setPwMsgOk] = useState(true)
 
+  const [showAdd, setShowAdd] = useState(false)
+  const [addForm, setAddForm] = useState({ name: '', email: '', password: '', starting_balance: '' })
+  const [addChores, setAddChores] = useState<string[]>([])
+  const [addingSaving, setAddingSaving] = useState(false)
+  const [deletingSaving, setDeletingSaving] = useState('')
+
   const load = useCallback(async () => {
     const [{ data: s }, { data: cr }, { data: cat }, { data: ch }, { data: asgn }, { data: { user } }] = await Promise.all([
       supabase.from('app_settings').select('*'),
@@ -209,6 +215,53 @@ export default function SettingsPage() {
       await supabase.from('chore_assignments').delete().eq('chore_id', choreId).eq('child_id', childId)
       setAssignments(prev => ({ ...prev, [childId]: (prev[childId] ?? []).filter(id => id !== choreId) }))
     }
+  }
+
+  async function addChild() {
+    setAddingSaving(true)
+    setMsg('')
+    try {
+      const res = await fetch('/api/admin/create-child', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(addForm),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error)
+      if (addChores.length > 0) {
+        await supabase.from('chore_assignments').insert(
+          addChores.map(choreId => ({ child_id: json.childId, chore_id: choreId }))
+        )
+      }
+      setMsg('Child account created!')
+      setAddForm({ name: '', email: '', password: '', starting_balance: '' })
+      setAddChores([])
+      setShowAdd(false)
+      load()
+    } catch (e: unknown) {
+      setMsg((e as Error).message)
+    }
+    setAddingSaving(false)
+  }
+
+  async function deleteChild(childId: string, childName: string) {
+    if (!confirm(`Delete ${childName}'s account and ALL their data? This cannot be undone.`)) return
+    setDeletingSaving(childId)
+    setMsg('')
+    const res = await fetch('/api/admin/delete-child', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ childId }),
+    })
+    if (res.ok) {
+      setMsg(`${childName}'s account deleted.`)
+      load()
+    } else {
+      const json = await res.json()
+      setMsg(json.error ?? 'Delete failed')
+    }
+    setDeletingSaving('')
+    setTimeout(() => setMsg(''), 3000)
   }
 
   async function addCategory() {
@@ -526,6 +579,126 @@ export default function SettingsPage() {
           />
           <button className="btn-primary" style={{ flexShrink: 0 }} onClick={addCategory}>Add</button>
         </div>
+      </div>
+
+      {/* Account Management */}
+      <div className="card">
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700 }}>👤 Account Management</h2>
+            <p style={{ margin: '0.25rem 0 0', fontSize: '0.875rem', color: '#64748b' }}>Add or remove child accounts</p>
+          </div>
+          <button className="btn-primary" onClick={() => setShowAdd(v => !v)}>
+            {showAdd ? 'Cancel' : '+ Add Child'}
+          </button>
+        </div>
+
+        {showAdd && (
+          <div style={{ background: '#f8fafc', borderRadius: '0.875rem', padding: '1.25rem', marginBottom: '1.25rem', border: '1px solid #e2e8f0' }}>
+            <div style={{ fontWeight: 700, fontSize: '0.95rem', marginBottom: '1rem' }}>New Child Account</div>
+            <div className="form-grid-2">
+              <div>
+                <label className="label">Name</label>
+                <input className="input" placeholder="e.g. Max"
+                  value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Login username</label>
+                <input className="input" placeholder="e.g. max@jz"
+                  value={addForm.email} onChange={e => setAddForm(f => ({ ...f, email: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Password</label>
+                <input className="input" type="password" placeholder="Set a password"
+                  value={addForm.password} onChange={e => setAddForm(f => ({ ...f, password: e.target.value }))} />
+              </div>
+              <div>
+                <label className="label">Starting Balance ($)</label>
+                <input className="input" type="number" min="0" step="1" placeholder="0"
+                  value={addForm.starting_balance} onChange={e => setAddForm(f => ({ ...f, starting_balance: e.target.value }))} />
+              </div>
+            </div>
+            {chores.length > 0 && (
+              <div style={{ marginTop: '1rem', borderTop: '1px solid #e2e8f0', paddingTop: '1rem' }}>
+                <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: '0.75rem' }}>Assign Chores</div>
+                {(['required', 'extra'] as const).map(type => {
+                  const group = chores.filter(c => c.type === type && c.active)
+                  if (group.length === 0) return null
+                  return (
+                    <div key={type} style={{ marginBottom: '0.75rem' }}>
+                      <div style={{ fontSize: '0.72rem', fontWeight: 700, color: type === 'required' ? '#1d4ed8' : '#d97706', marginBottom: '0.4rem', textTransform: 'uppercase' }}>
+                        {type === 'required' ? 'Part 1 — Required' : 'Part 2 — Extra'}
+                      </div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
+                        {group.map(chore => (
+                          <label key={chore.id} style={{
+                            display: 'flex', alignItems: 'center', gap: '0.4rem',
+                            padding: '0.3rem 0.65rem',
+                            background: addChores.includes(chore.id) ? (type === 'required' ? '#dbeafe' : '#fef3c7') : 'white',
+                            border: `1px solid ${addChores.includes(chore.id) ? (type === 'required' ? '#93c5fd' : '#fde68a') : '#e2e8f0'}`,
+                            borderRadius: '999px', cursor: 'pointer', fontSize: '0.82rem', fontWeight: 500,
+                            color: addChores.includes(chore.id) ? (type === 'required' ? '#1d4ed8' : '#d97706') : '#64748b',
+                          }}>
+                            <input type="checkbox" checked={addChores.includes(chore.id)}
+                              onChange={e => setAddChores(prev => e.target.checked ? [...prev, chore.id] : prev.filter(id => id !== chore.id))}
+                              style={{ accentColor: type === 'required' ? '#1d4ed8' : '#d97706', cursor: 'pointer' }} />
+                            {chore.name}{type === 'extra' ? ` (+$${Math.ceil(chore.reward_amount ?? 0)})` : ''}
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                })}
+                <p style={{ fontSize: '0.75rem', color: '#94a3b8', margin: '0.5rem 0 0' }}>If none selected, all active chores will be assigned.</p>
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
+              <button className="btn-primary" onClick={addChild} disabled={addingSaving || !addForm.name || !addForm.email || !addForm.password}>
+                {addingSaving ? 'Creating...' : 'Create Account'}
+              </button>
+              <button className="btn-secondary" onClick={() => { setShowAdd(false); setAddChores([]) }}>Cancel</button>
+            </div>
+          </div>
+        )}
+
+        {/* Children list */}
+        {children.length === 0 ? (
+          <p style={{ color: '#94a3b8', fontSize: '0.875rem' }}>No child accounts yet.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            {children.map(child => (
+              <div key={child.id} style={{
+                display: 'flex', alignItems: 'center', gap: '1rem',
+                padding: '0.75rem 1rem', background: '#f8fafc',
+                borderRadius: '0.75rem', border: '1px solid #e2e8f0',
+              }}>
+                <div style={{
+                  width: '36px', height: '36px', background: '#dcfce7', borderRadius: '50%',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontWeight: 700, color: '#16a34a', fontSize: '1rem', flexShrink: 0,
+                }}>
+                  {child.name.charAt(0)}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 600 }}>{child.name}</div>
+                  <div style={{ fontSize: '0.78rem', color: '#64748b' }}>{child.email}</div>
+                </div>
+                <button
+                  onClick={() => deleteChild(child.id, child.name)}
+                  disabled={deletingSaving === child.id}
+                  style={{
+                    fontSize: '0.78rem', color: '#dc2626', background: 'none',
+                    border: '1px solid #fecaca', borderRadius: '0.5rem',
+                    padding: '0.3rem 0.65rem', cursor: deletingSaving === child.id ? 'not-allowed' : 'pointer',
+                    opacity: deletingSaving === child.id ? 0.5 : 1,
+                  }}
+                >
+                  {deletingSaving === child.id ? 'Deleting...' : 'Delete Account'}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Change Password */}

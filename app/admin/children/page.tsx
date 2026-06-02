@@ -50,10 +50,6 @@ export default function ChildrenPage() {
 
   const [activeSection, setActiveSection] = useState<Record<string, SectionKey | null>>({})
 
-  const [showAdd, setShowAdd] = useState(false)
-  const [addForm, setAddForm] = useState({ name: '', email: '', password: '', starting_balance: '' })
-  const [addChores, setAddChores] = useState<string[]>([])
-  const [addingSaving, setAddingSaving] = useState(false)
 
   const [chores, setChores] = useState<ChoreTemplate[]>([])
   const [assignments, setAssignments] = useState<Record<string, string[]>>({})
@@ -468,47 +464,16 @@ export default function ChildrenPage() {
     setTimeout(() => setMsg(''), 3000)
   }
 
-  async function addChild() {
-    setAddingSaving(true)
-    setMsg('')
-    try {
-      const res = await fetch('/api/admin/create-child', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(addForm),
-      })
-      const json = await res.json()
-      if (!res.ok) throw new Error(json.error)
-      if (addChores.length > 0) {
-        await supabase.from('chore_assignments').insert(
-          addChores.map(choreId => ({ child_id: json.childId, chore_id: choreId }))
-        )
-      }
-      setMsg('Child account created!')
-      setAddForm({ name: '', email: '', password: '', starting_balance: '' })
-      setAddChores([])
-      setShowAdd(false)
-      load()
-    } catch (e: unknown) {
-      setMsg((e as Error).message)
-    }
-    setAddingSaving(false)
-  }
 
   if (loading) return <div style={{ padding: '3rem', textAlign: 'center', color: '#94a3b8' }}>Loading...</div>
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <div>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Children</h1>
-          <p style={{ color: '#64748b', marginTop: '0.25rem', fontSize: '0.9rem' }}>
-            Week of {new Date(weekStart + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
-          </p>
-        </div>
-        <button className="btn-primary" onClick={() => setShowAdd(v => !v)}>
-          {showAdd ? 'Cancel' : '+ Add Child'}
-        </button>
+      <div>
+        <h1 style={{ fontSize: '1.5rem', fontWeight: 700, margin: 0 }}>Children</h1>
+        <p style={{ color: '#64748b', marginTop: '0.25rem', fontSize: '0.9rem' }}>
+          Week of {new Date(weekStart + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+        </p>
       </div>
 
       {msg && (
@@ -519,83 +484,6 @@ export default function ChildrenPage() {
         }}>{msg}</div>
       )}
 
-      {showAdd && (
-        <div className="card">
-          <h2 style={{ margin: '0 0 1rem', fontSize: '1.1rem', fontWeight: 700 }}>New Child Account</h2>
-          <div className="form-grid-2">
-            <div>
-              <label className="label">Name</label>
-              <input className="input" placeholder="e.g. Max"
-                value={addForm.name} onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))} />
-            </div>
-            <div>
-              <label className="label">Login username</label>
-              <input className="input" placeholder="e.g. max@jz"
-                value={addForm.email} onChange={e => setAddForm(f => ({ ...f, email: e.target.value }))} />
-            </div>
-            <div>
-              <label className="label">Password</label>
-              <input className="input" type="password" placeholder="Set a password"
-                value={addForm.password} onChange={e => setAddForm(f => ({ ...f, password: e.target.value }))} />
-            </div>
-            <div>
-              <label className="label">Starting Balance ($)</label>
-              <input className="input" type="number" min="0" step="1" placeholder="0"
-                value={addForm.starting_balance} onChange={e => setAddForm(f => ({ ...f, starting_balance: e.target.value }))} />
-            </div>
-          </div>
-          {/* Chore assignment */}
-          {chores.length > 0 && (
-            <div style={{ marginTop: '1.25rem', borderTop: '1px solid #f1f5f9', paddingTop: '1.25rem' }}>
-              <div style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: '0.75rem' }}>Assign Chores</div>
-              {(['required', 'extra'] as const).map(type => {
-                const group = chores.filter(c => c.type === type)
-                if (group.length === 0) return null
-                return (
-                  <div key={type} style={{ marginBottom: '0.75rem' }}>
-                    <div style={{ fontSize: '0.75rem', fontWeight: 700, color: type === 'required' ? '#1d4ed8' : '#d97706', marginBottom: '0.4rem', textTransform: 'uppercase' }}>
-                      {type === 'required' ? 'Part 1 — Required' : 'Part 2 — Extra Rewards'}
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                      {group.map(chore => (
-                        <label key={chore.id} style={{
-                          display: 'flex', alignItems: 'center', gap: '0.4rem',
-                          padding: '0.35rem 0.75rem',
-                          background: addChores.includes(chore.id) ? (type === 'required' ? '#dbeafe' : '#fef3c7') : '#f8fafc',
-                          border: `1px solid ${addChores.includes(chore.id) ? (type === 'required' ? '#93c5fd' : '#fde68a') : '#e2e8f0'}`,
-                          borderRadius: '999px', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 500,
-                          color: addChores.includes(chore.id) ? (type === 'required' ? '#1d4ed8' : '#d97706') : '#64748b',
-                          transition: 'all 0.15s',
-                        }}>
-                          <input
-                            type="checkbox"
-                            checked={addChores.includes(chore.id)}
-                            onChange={e => setAddChores(prev =>
-                              e.target.checked ? [...prev, chore.id] : prev.filter(id => id !== chore.id)
-                            )}
-                            style={{ accentColor: type === 'required' ? '#1d4ed8' : '#d97706', cursor: 'pointer' }}
-                          />
-                          {chore.name}{type === 'extra' ? ` (+${formatMoney(chore.reward_amount ?? 0)})` : ''}
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-              <p style={{ fontSize: '0.78rem', color: '#94a3b8', margin: '0.5rem 0 0' }}>
-                If none selected, all active chores will be assigned.
-              </p>
-            </div>
-          )}
-
-          <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1rem' }}>
-            <button className="btn-primary" onClick={addChild} disabled={addingSaving}>
-              {addingSaving ? 'Creating...' : 'Create Account'}
-            </button>
-            <button className="btn-secondary" onClick={() => { setShowAdd(false); setAddChores([]) }}>Cancel</button>
-          </div>
-        </div>
-      )}
 
       {children.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: '3rem' }}>
@@ -664,32 +552,11 @@ export default function ChildrenPage() {
                   <div style={{ fontWeight: 700, fontSize: '1.1rem' }}>{child.name}</div>
                   <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{child.email}</div>
                 </div>
-                <div style={{ textAlign: 'right', display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.4rem' }}>
-                  <div>
-                    <div style={{ fontSize: '1.5rem', fontWeight: 700, color: child.balance >= 0 ? '#16a34a' : '#dc2626' }}>
-                      {formatMoney(child.balance)}
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>balance</div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: child.balance >= 0 ? '#16a34a' : '#dc2626' }}>
+                    {formatMoney(child.balance)}
                   </div>
-                  <button
-                    onClick={async () => {
-                      if (!confirm(`Delete ${child.name}'s account and all their data? This cannot be undone.`)) return
-                      const res = await fetch('/api/admin/delete-child', {
-                        method: 'DELETE',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ childId: child.id }),
-                      })
-                      if (res.ok) { setMsg(`${child.name}'s account deleted`); load() }
-                      else { const j = await res.json(); setMsg(j.error ?? 'Delete failed') }
-                    }}
-                    style={{
-                      fontSize: '0.7rem', color: '#dc2626', background: 'none',
-                      border: '1px solid #fecaca', borderRadius: '0.5rem',
-                      padding: '0.2rem 0.5rem', cursor: 'pointer',
-                    }}
-                  >
-                    Delete
-                  </button>
+                  <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>balance</div>
                 </div>
               </div>
 
