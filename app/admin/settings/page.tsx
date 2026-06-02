@@ -111,18 +111,27 @@ export default function SettingsPage() {
     setTimeout(() => setMsg(''), 2000)
   }
 
+  async function choreHasActiveCounts(choreId: string): Promise<boolean> {
+    const { data: pendingCls } = await supabase
+      .from('weekly_checklists')
+      .select('id')
+      .eq('week_start', getThisSaturday())
+      .neq('status', 'approved')
+    if (!pendingCls || pendingCls.length === 0) return false
+    const { count } = await supabase
+      .from('checklist_items')
+      .select('id', { count: 'exact', head: true })
+      .eq('chore_id', choreId)
+      .in('checklist_id', pendingCls.map(c => c.id))
+      .gt('count', 0)
+    return (count ?? 0) > 0
+  }
+
   async function toggleChore(id: string, active: boolean) {
-    if (!active) {
-      const { count } = await supabase
-        .from('extra_task_logs')
-        .select('id', { count: 'exact', head: true })
-        .eq('chore_id', id)
-        .eq('week_start', getThisSaturday())
-      if ((count ?? 0) > 0) {
-        setWarnMsg(`Can't disable — ${count} session(s) logged by children this week. Clear all session records first.`)
-        setTimeout(() => setWarnMsg(''), 5000)
-        return
-      }
+    if (!active && await choreHasActiveCounts(id)) {
+      setWarnMsg(`Can't disable — one or more children still have this task counted in this week's checklist. Set the count to 0 first.`)
+      setTimeout(() => setWarnMsg(''), 5000)
+      return
     }
     await supabase.from('chore_templates').update({ active }).eq('id', id)
     setChores(prev => prev.map(c => c.id === id ? { ...c, active } : c))
@@ -135,19 +144,14 @@ export default function SettingsPage() {
       setTimeout(() => setWarnMsg(''), 5000)
       return
     }
-    const { count: sessionCount } = await supabase
-      .from('extra_task_logs')
-      .select('id', { count: 'exact', head: true })
-      .eq('chore_id', id)
-      .eq('week_start', getThisSaturday())
-    if ((sessionCount ?? 0) > 0) {
-      setWarnMsg(`Can't delete — ${sessionCount} session(s) logged this week. Clear all session records first.`)
+    if (await choreHasActiveCounts(id)) {
+      setWarnMsg(`Can't delete — one or more children still have this task counted in this week's checklist. Set the count to 0 first.`)
       setTimeout(() => setWarnMsg(''), 5000)
       return
     }
     const { error } = await supabase.from('chore_templates').delete().eq('id', id)
     if (error) {
-      setWarnMsg('This task has historical records and cannot be deleted. Deactivate it instead.')
+      setWarnMsg('This task has historical records and cannot be fully deleted. Use the "Disable" button on this task row to hide it from future checklists.')
       setTimeout(() => setWarnMsg(''), 5000)
       return
     }
