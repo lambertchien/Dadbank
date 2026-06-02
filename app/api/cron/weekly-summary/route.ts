@@ -47,6 +47,7 @@ export async function GET(req: Request) {
   }))
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? ''
+  if (!appUrl) console.error('[weekly-summary] NEXT_PUBLIC_APP_URL is not set — email links will be broken')
   await sendWeeklySummary(to, children, appUrl)
 
   return NextResponse.json({ ok: true, children: children.length, to: to.length })

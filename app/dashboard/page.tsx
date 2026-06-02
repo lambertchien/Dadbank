@@ -106,9 +106,11 @@ export default function DashboardPage() {
     const state = titheStates[record.id]
     if (!state || !profile) return
     const amount = parseFloat(state.input)
-    const minTithe = record.income_amount * defaultTithePct / 100
+    // Use the percentage locked on the record, not the current app setting
+    const minPct = record.tithe_percentage
+    const minTithe = record.income_amount * minPct / 100
     if (isNaN(amount) || amount < minTithe) {
-      setMsg(`Tithe must be at least ${defaultTithePct}% (${formatMoney(minTithe)})`)
+      setMsg(`Tithe must be at least ${minPct}% (${formatMoney(minTithe)})`)
       return
     }
 
@@ -164,10 +166,10 @@ export default function DashboardPage() {
       {pendingTithes.map(record => {
         const state = titheStates[record.id]
         if (!state) return null
-        const minTithe = record.income_amount * defaultTithePct / 100
+        const minTithe = record.income_amount * record.tithe_percentage / 100
         const titheAmount = parseFloat(state.input) || 0
         const titheValid = titheAmount >= minTithe
-        const isInterest = !record.checklist_id && record.description?.toLowerCase().includes('interest')
+        const isInterest = !record.checklist_id && record.description?.startsWith('Monthly interest (')
         const cardTitle = record.checklist_id ? 'Allowance Ready!' : (isInterest ? 'Interest Ready!' : 'Deposit Ready!')
         const incomeLabel = record.checklist_id ? 'Allowance' : (isInterest ? 'Interest' : 'Deposit')
 
@@ -224,7 +226,7 @@ export default function DashboardPage() {
                 }} />
               </div>
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.72rem', marginTop: '0.3rem' }}>
-                <span style={{ color: '#7c3aed', fontWeight: 600 }}>Min {defaultTithePct}%</span>
+                <span style={{ color: '#7c3aed', fontWeight: 600 }}>Min {record.tithe_percentage}%</span>
                 <span style={{ color: '#94a3b8' }}>100%</span>
               </div>
             </div>

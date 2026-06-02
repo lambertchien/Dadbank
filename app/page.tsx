@@ -17,7 +17,7 @@ export default async function Home() {
 
   if (profile?.role === 'admin') redirect('/admin')
 
-  const { data: pendingTithe } = await supabase
+  const { data: pendingTithe, error: titheError } = await supabase
     .from('tithe_records')
     .select('id')
     .eq('child_id', user.id)
@@ -25,5 +25,6 @@ export default async function Home() {
     .limit(1)
     .maybeSingle()
 
-  redirect(pendingTithe ? '/dashboard' : '/dashboard/tasks')
+  // On RLS/network error, fall back to dashboard so any pending tithe card is visible
+  redirect((!titheError && pendingTithe) ? '/dashboard' : titheError ? '/dashboard' : '/dashboard/tasks')
 }

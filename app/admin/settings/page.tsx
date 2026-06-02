@@ -157,11 +157,17 @@ export default function SettingsPage() {
     }
     const choreName = chores.find(c => c.id === id)?.name ?? 'this task'
     if (!confirm(`Delete "${choreName}"? This cannot be undone.`)) return
-    // Clean up historical checklist_items first (financial transactions are already recorded)
-    await supabase.from('checklist_items').delete().eq('chore_id', id)
+    // Remove items from non-approved checklists only — approved history is preserved
+    const { data: pendingCls } = await supabase
+      .from('weekly_checklists').select('id').neq('status', 'approved')
+    if (pendingCls && pendingCls.length > 0) {
+      await supabase.from('checklist_items').delete()
+        .eq('chore_id', id)
+        .in('checklist_id', pendingCls.map(c => c.id))
+    }
     const { error } = await supabase.from('chore_templates').delete().eq('id', id)
     if (error) {
-      setWarnMsg('Unable to delete this task. Try disabling it instead.')
+      setWarnMsg('This task has approved history that must be preserved. Deactivate it instead.')
       setTimeout(() => setWarnMsg(''), 5000)
       return
     }

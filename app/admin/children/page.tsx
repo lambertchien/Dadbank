@@ -124,8 +124,9 @@ export default function ChildrenPage() {
       }
     }
     if (missingInserts.length > 0) {
-      await supabase.from('checklist_items').insert(missingInserts)
-      // Re-fetch affected checklists to get the new items with their chore_templates join
+      const { error: insertErr } = await supabase.from('checklist_items').insert(missingInserts)
+      if (insertErr) console.error('[checklist] missingInserts failed (possible race):', insertErr.message)
+      // Re-fetch affected checklists regardless — if insert failed due to a race, the other tab's rows are there
       await Promise.all([...refetchIds].map(async id => {
         const { data: refreshed } = await supabase
           .from('weekly_checklists').select('*, checklist_items(*, chore_templates(*))').eq('id', id).single()

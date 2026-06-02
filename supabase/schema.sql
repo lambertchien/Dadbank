@@ -249,6 +249,9 @@ create trigger trg_update_balance
   after insert on public.transactions
   for each row execute function public.update_balance_on_transaction();
 
+-- ── Admin count override flag (run this if not already applied) ──
+alter table public.checklist_items add column if not exists admin_adjusted boolean not null default false;
+
 -- ── Extra task logs (child self-reported sessions) ────────────
 create table if not exists public.extra_task_logs (
   id         uuid primary key default gen_random_uuid(),
