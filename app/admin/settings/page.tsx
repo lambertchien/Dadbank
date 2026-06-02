@@ -149,6 +149,8 @@ export default function SettingsPage() {
       setTimeout(() => setWarnMsg(''), 5000)
       return
     }
+    const choreName = chores.find(c => c.id === id)?.name ?? 'this task'
+    if (!confirm(`Delete "${choreName}"? This cannot be undone.`)) return
     // Clean up historical checklist_items first (financial transactions are already recorded)
     await supabase.from('checklist_items').delete().eq('chore_id', id)
     const { error } = await supabase.from('chore_templates').delete().eq('id', id)
