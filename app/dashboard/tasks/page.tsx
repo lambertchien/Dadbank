@@ -44,17 +44,19 @@ export default function TasksPage() {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
 
-    const [{ data: chores }, { data: logData }] = await Promise.all([
+    const [{ data: chores }, { data: logData }, { data: assignData }] = await Promise.all([
       supabase.from('chore_templates').select('*').eq('active', true).order('sort_order'),
       supabase.from('extra_task_logs')
         .select('id, chore_id, logged_at')
         .eq('child_id', user.id)
         .eq('week_start', weekStart)
         .order('logged_at', { ascending: false }),
+      supabase.from('chore_assignments').select('chore_id').eq('child_id', user.id),
     ])
 
+    const assignedIds = new Set((assignData ?? []).map(a => a.chore_id))
     setRequired((chores ?? []).filter(c => c.type === 'required'))
-    setExtras((chores ?? []).filter(c => c.type === 'extra'))
+    setExtras((chores ?? []).filter(c => c.type === 'extra' && (assignedIds.size === 0 || assignedIds.has(c.id))))
     setLogs(logData ?? [])
     setLoading(false)
   }, [supabase, weekStart])
