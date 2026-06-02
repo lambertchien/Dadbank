@@ -13,5 +13,15 @@ export default async function Home() {
     .eq('id', user.id)
     .single()
 
-  redirect(profile?.role === 'admin' ? '/admin' : '/dashboard/tasks')
+  if (profile?.role === 'admin') redirect('/admin')
+
+  const { data: pendingTithe } = await supabase
+    .from('tithe_records')
+    .select('id')
+    .eq('child_id', user.id)
+    .eq('completed', false)
+    .limit(1)
+    .maybeSingle()
+
+  redirect(pendingTithe ? '/dashboard' : '/dashboard/tasks')
 }
