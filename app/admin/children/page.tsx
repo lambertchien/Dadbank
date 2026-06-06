@@ -357,6 +357,13 @@ export default function ChildrenPage() {
       })
     }
 
+    // Sessions have been counted and paid — clear this week's logs so counts
+    // reset to 0 immediately and next week starts fresh
+    await supabase.from('extra_task_logs')
+      .delete()
+      .eq('child_id', child.id)
+      .eq('week_start', weekStart)
+
     setMsg(`Allowance approved for ${child.name}!`)
     load()
     setChecklistSaving(null)
