@@ -22,7 +22,11 @@ function getThisSaturday() {
   const day = d.getDay()
   const diff = day === 6 ? 0 : (6 - day)
   d.setDate(d.getDate() + diff)
-  return d.toISOString().split('T')[0]
+  // Use local date parts — toISOString() returns UTC which is one day behind SGT before 8am
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
 }
 
 type ChecklistWithItems = WeeklyChecklist & { checklist_items: (ChecklistItem & { chore_templates: ChoreTemplate })[] }
@@ -114,9 +118,10 @@ export default function ChildrenPage() {
     for (const checklist of clList) {
       if (checklist.status === 'approved') continue
       const assigned = asgnMap[checklist.child_id] ?? []
-      if (assigned.length === 0) continue
+      // If child has no explicit assignments, they get all chores
+      const choreIds = assigned.length > 0 ? assigned : (cr ?? []).map(c => c.id)
       const existingChoreIds = new Set(checklist.checklist_items.map(i => i.chore_id))
-      for (const choreId of assigned) {
+      for (const choreId of choreIds) {
         if (!existingChoreIds.has(choreId)) {
           missingInserts.push({ checklist_id: checklist.id, chore_id: choreId, checked: false, reward_earned: 0 })
           refetchIds.add(checklist.id)

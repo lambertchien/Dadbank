@@ -15,7 +15,11 @@ function getThisSaturday() {
   const day = d.getDay()
   const diff = day === 6 ? 0 : 6 - day
   d.setDate(d.getDate() + diff)
-  return d.toISOString().split('T')[0]
+  // Use local date parts — toISOString() returns UTC which is one day behind SGT before 8am
+  const y = d.getFullYear()
+  const mo = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${mo}-${dd}`
 }
 
 function formatDateTime(iso: string) {

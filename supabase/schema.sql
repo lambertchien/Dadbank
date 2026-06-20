@@ -269,3 +269,8 @@ create policy "admins can read all logs" on public.extra_task_logs
   for select using (
     exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
   );
+
+create policy "admins can delete all logs" on public.extra_task_logs
+  for delete using (
+    exists (select 1 from public.profiles p where p.id = auth.uid() and p.role = 'admin')
+  );

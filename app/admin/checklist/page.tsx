@@ -20,7 +20,11 @@ function getThisSaturday() {
   const day = d.getDay()
   const diff = day === 6 ? 0 : (6 - day)
   d.setDate(d.getDate() + diff)
-  return d.toISOString().split('T')[0]
+  // Use local date parts — toISOString() returns UTC which is one day behind SGT before 8am
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
 }
 
 type ChecklistWithItems = WeeklyChecklist & { checklist_items: (ChecklistItem & { chore_templates: ChoreTemplate })[] }
@@ -78,6 +82,7 @@ export default function ChecklistPage() {
       let extraDirty = false
       for (const item of checklist.checklist_items) {
         if (item.chore_templates?.type !== 'extra') continue
+        if (item.admin_adjusted) continue  // admin has explicitly set this count — don't overwrite
         const logCount = logMap[`${checklist.child_id}-${item.chore_id}`]?.length ?? 0
         if (item.count !== logCount) {
           const reward = logCount * (item.chore_templates.reward_amount ?? 0)
@@ -233,7 +238,7 @@ export default function ChecklistPage() {
     if (count < 0) return
     const cl = await ensureChecklist(childId)
     const reward = count * (chore.reward_amount ?? 0)
-    await supabase.from('checklist_items').update({ count, checked: count > 0, reward_earned: reward }).eq('id', itemId)
+    await supabase.from('checklist_items').update({ count, checked: count > 0, reward_earned: reward, admin_adjusted: true }).eq('id', itemId)
     const updatedItems = cl.checklist_items.map(i =>
       i.id === itemId ? { ...i, count, checked: count > 0, reward_earned: reward } : i
     )
