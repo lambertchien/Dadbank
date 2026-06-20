@@ -63,6 +63,8 @@ export default function ChildrenPage() {
   const [defaultAllowance, setDefaultAllowance] = useState(100)
   const [defaultTithePct, setDefaultTithePct] = useState(10)
   const [checklistSaving, setChecklistSaving] = useState<string | null>(null)
+  const [missedChecklists, setMissedChecklists] = useState<Record<string, ChecklistWithItems[]>>({})
+  const [missedSaving, setMissedSaving] = useState<string | null>(null)
 
   const [withdrawals, setWithdrawals] = useState<WRWithProfile[]>([])
   const [actingWR, setActingWR] = useState<string | null>(null)
@@ -83,7 +85,7 @@ export default function ChildrenPage() {
   const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({})
 
   const load = useCallback(async () => {
-    const [{ data: ch }, { data: cr }, { data: cl }, { data: settings }, { data: titheSetting }, { data: wr }, { data: asgn }, { data: titheDone }, { data: manualTitheData }, { data: logs }] = await Promise.all([
+    const [{ data: ch }, { data: cr }, { data: cl }, { data: settings }, { data: titheSetting }, { data: wr }, { data: asgn }, { data: titheDone }, { data: manualTitheData }, { data: logs }, { data: olderCl }] = await Promise.all([
       supabase.from('profiles').select('*').eq('role', 'child').order('name'),
       supabase.from('chore_templates').select('*').eq('active', true).order('type').order('sort_order'),
       supabase.from('weekly_checklists').select('*, checklist_items(*, chore_templates(*))').eq('week_start', weekStart),
@@ -94,6 +96,7 @@ export default function ChildrenPage() {
       supabase.from('tithe_records').select('checklist_id').eq('completed', true),
       supabase.from('tithe_records').select('id, child_id, income_amount, completed, description, created_at').is('checklist_id', null).order('created_at', { ascending: false }),
       supabase.from('extra_task_logs').select('id, child_id, chore_id, logged_at').eq('week_start', weekStart).order('logged_at', { ascending: false }),
+      supabase.from('weekly_checklists').select('*, checklist_items(*, chore_templates(*))').lt('week_start', weekStart).eq('status', 'pending').order('week_start', { ascending: true }),
     ])
 
     setChildren(ch ?? [])
@@ -181,6 +184,14 @@ export default function ChildrenPage() {
     const clMap: Record<string, ChecklistWithItems> = {}
     for (const c of clList) clMap[c.child_id] = c
     setChecklists(clMap)
+
+    const missedMap: Record<string, ChecklistWithItems[]> = {}
+    for (const c of (olderCl ?? []) as ChecklistWithItems[]) {
+      if (!missedMap[c.child_id]) missedMap[c.child_id] = []
+      missedMap[c.child_id].push(c)
+    }
+    setMissedChecklists(missedMap)
+
     setCompletedTithes(new Set((titheDone ?? []).map(t => t.checklist_id).filter(Boolean)))
 
     const manualMap: Record<string, ManualTitheRecord[]> = {}
@@ -373,6 +384,42 @@ export default function ChildrenPage() {
     setMsg(`Allowance approved for ${child.name}!`)
     load()
     setChecklistSaving(null)
+    setTimeout(() => setMsg(''), 3000)
+  }
+
+  async function approveMissedAllowance(child: Profile, missedCl: ChecklistWithItems) {
+    setMissedSaving(missedCl.id)
+    setMsg('')
+    const total = missedCl.base_amount + missedCl.extra_amount
+    const { data: { user } } = await supabase.auth.getUser()
+
+    await supabase.from('weekly_checklists').update({
+      status: 'approved',
+      approved_by: user?.id,
+      approved_at: new Date().toISOString(),
+    }).eq('id', missedCl.id)
+
+    if (total > 0) {
+      const { data: settings } = await supabase.from('app_settings').select('value').eq('key', 'tithe_percentage').single()
+      const pct = parseFloat(settings?.value ?? '10')
+      await supabase.from('tithe_records').insert({
+        child_id: child.id,
+        checklist_id: missedCl.id,
+        income_amount: total,
+        tithe_amount: Math.ceil(total * pct / 100),
+        tithe_percentage: pct,
+        completed: false,
+      })
+    }
+
+    await supabase.from('extra_task_logs')
+      .delete()
+      .eq('child_id', child.id)
+      .eq('week_start', missedCl.week_start)
+
+    setMsg(`Approved missed week for ${child.name}!`)
+    load()
+    setMissedSaving(null)
     setTimeout(() => setMsg(''), 3000)
   }
 
@@ -615,6 +662,44 @@ export default function ChildrenPage() {
               {/* Checklist section */}
               {section === 'checklist' && (
                 <div style={{ padding: '1.5rem' }}>
+                  {/* Missed weeks — show oldest first, each can be approved independently */}
+                  {(missedChecklists[child.id] ?? []).map(missedCl => {
+                    const missedTotal = missedCl.base_amount + missedCl.extra_amount
+                    const missedReqItems = missedCl.checklist_items.filter(i => i.chore_templates?.type === 'required')
+                    const missedExtraItems = missedCl.checklist_items.filter(i => i.chore_templates?.type === 'extra')
+                    const missedReqDone = missedReqItems.filter(i => i.checked).length
+                    const weekLabel = new Date(missedCl.week_start + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
+                    return (
+                      <div key={missedCl.id} style={{
+                        background: '#fefce8', border: '1px solid #fde047',
+                        borderRadius: '0.75rem', padding: '1rem', marginBottom: '1rem',
+                      }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                          <span style={{ fontSize: '1.1rem' }}>⚠️</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 700, color: '#854d0e', fontSize: '0.9rem' }}>
+                              Unapproved — week of {weekLabel}
+                            </div>
+                            <div style={{ fontSize: '0.78rem', color: '#92400e', marginTop: '0.2rem' }}>
+                              Part 1: {missedReqDone}/{missedReqItems.length} done
+                              {missedExtraItems.some(i => (i.count ?? 0) > 0) && (
+                                <span> · Extras: {missedExtraItems.filter(i => (i.count ?? 0) > 0).map(i => `${i.chore_templates?.name} ×${i.count}`).join(', ')}</span>
+                              )}
+                              <span style={{ marginLeft: '0.5rem', fontWeight: 700 }}>→ Total: {formatMoney(missedTotal)}</span>
+                            </div>
+                          </div>
+                          <button
+                            className="btn-primary"
+                            onClick={() => approveMissedAllowance(child, missedCl)}
+                            disabled={missedSaving === missedCl.id || missedTotal === 0}
+                            style={{ fontSize: '0.85rem', padding: '0.375rem 0.875rem', flexShrink: 0 }}
+                          >
+                            {missedSaving === missedCl.id ? 'Approving...' : `Approve ${formatMoney(missedTotal)}`}
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
                   {approved ? (
                     <>
                       {!completedTithes.has(cl?.id ?? '') && (
