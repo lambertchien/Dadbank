@@ -791,13 +791,13 @@ export default function ChildrenPage() {
                                     <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', flexShrink: 0 }}>
                                       <button
                                         onClick={() => setExtraCount(child.id, item.id, chore, count - 1)}
-                                        disabled={!isSaturday || count === 0}
+                                        disabled={count === 0}
                                         style={{
                                           width: '24px', height: '24px', borderRadius: '50%',
                                           border: '1.5px solid #e2e8f0', background: 'white',
                                           fontSize: '0.95rem', fontWeight: 700,
-                                          cursor: (!isSaturday || count === 0) ? 'not-allowed' : 'pointer',
-                                          opacity: (!isSaturday || count === 0) ? 0.35 : 1, color: '#374151',
+                                          cursor: count === 0 ? 'not-allowed' : 'pointer',
+                                          opacity: count === 0 ? 0.35 : 1, color: '#374151',
                                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                                         }}
                                       >−</button>
@@ -808,13 +808,11 @@ export default function ChildrenPage() {
                                       }}>{count}</span>
                                       <button
                                         onClick={() => setExtraCount(child.id, item.id, chore, count + 1)}
-                                        disabled={!isSaturday}
                                         style={{
                                           width: '24px', height: '24px', borderRadius: '50%',
                                           border: '1.5px solid #e2e8f0', background: 'white',
                                           fontSize: '0.95rem', fontWeight: 700,
-                                          cursor: isSaturday ? 'pointer' : 'not-allowed',
-                                          opacity: isSaturday ? 1 : 0.35, color: '#374151',
+                                          cursor: 'pointer', color: '#374151',
                                           display: 'flex', alignItems: 'center', justifyContent: 'center',
                                         }}
                                       >+</button>
