@@ -59,7 +59,7 @@ export default function TasksPage() {
     ])
 
     const assignedIds = new Set((assignData ?? []).map(a => a.chore_id))
-    setRequired((chores ?? []).filter(c => c.type === 'required'))
+    setRequired((chores ?? []).filter(c => c.type === 'required' && (assignedIds.size === 0 || assignedIds.has(c.id))))
     setExtras((chores ?? []).filter(c => c.type === 'extra' && (assignedIds.size === 0 || assignedIds.has(c.id))))
     setLogs(logData ?? [])
     setLoading(false)
