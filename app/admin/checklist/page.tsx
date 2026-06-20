@@ -44,6 +44,7 @@ export default function ChecklistPage() {
   const [saving, setSaving] = useState<string | null>(null)
   const [msg, setMsg] = useState('')
   const weekStart = getThisSaturday()
+  const isSaturday = new Date().getDay() === 6
 
   const load = useCallback(async () => {
     const [{ data: ch }, { data: cr }, { data: cl }, { data: settings }, { data: logs }, { data: asgn }] = await Promise.all([
@@ -367,7 +368,7 @@ export default function ChecklistPage() {
                 display: 'flex', alignItems: 'center', gap: '0.75rem', color: '#15803d', fontWeight: 600,
               }}>
                 <span style={{ fontSize: '1.25rem' }}>✅</span>
-                Allowance approved — {formatMoney(total)} added to account
+                Week approved — next checklist opens on Saturday
               </div>
             ) : (
               <>
@@ -395,8 +396,9 @@ export default function ChecklistPage() {
                           <input
                             type="checkbox"
                             checked={item.checked}
-                            onChange={e => toggleItem(child.id, item.id, chore, e.target.checked)}
-                            style={{ width: '18px', height: '18px', cursor: 'pointer', accentColor: '#16a34a' }}
+                            onChange={e => isSaturday && toggleItem(child.id, item.id, chore, e.target.checked)}
+                            disabled={!isSaturday}
+                            style={{ width: '18px', height: '18px', cursor: isSaturday ? 'pointer' : 'not-allowed', accentColor: '#16a34a' }}
                           />
                           <span style={{ fontWeight: 500, flex: 1 }}>{chore.name}</span>
                           {item.checked && <span style={{ color: '#16a34a', fontSize: '0.85rem', fontWeight: 600 }}>✓</span>}
@@ -550,9 +552,9 @@ export default function ChecklistPage() {
                   <button
                     className="btn-primary"
                     onClick={() => approveAllowance(child)}
-                    disabled={saving === child.id || total === 0}
+                    disabled={saving === child.id || total === 0 || !isSaturday}
                   >
-                    {saving === child.id ? 'Approving...' : `Approve & Pay ${formatMoney(total)}`}
+                    {saving === child.id ? 'Approving...' : !isSaturday ? 'Available on Saturday' : `Approve & Pay ${formatMoney(total)}`}
                   </button>
                 </div>
               </>

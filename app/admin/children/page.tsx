@@ -47,6 +47,7 @@ const TX_STYLES: Record<string, { bg: string; color: string; label: string; emoj
 export default function ChildrenPage() {
   const supabase = createClient()
   const weekStart = getThisSaturday()
+  const isSaturday = new Date().getDay() === 6
 
   const [children, setChildren] = useState<Profile[]>([])
   const [loading, setLoading] = useState(true)
@@ -515,6 +516,10 @@ export default function ChildrenPage() {
           const reqAllChecked = reqItems.length > 0 && reqItems.every(i => i.checked)
           const childWithdrawals = withdrawals.filter(w => w.child_id === child.id)
           const adjustForm = adjustForms[child.id] ?? { amount: '', description: '', type: 'deposit' as const, tithe: false }
+          const assignedIds = assignments[child.id]
+          const extrasForChild = chores.filter(c =>
+            c.type === 'extra' && (assignedIds && assignedIds.length > 0 ? assignedIds.includes(c.id) : true)
+          )
 
           const tabs = [
             {
@@ -611,19 +616,93 @@ export default function ChildrenPage() {
               {section === 'checklist' && (
                 <div style={{ padding: '1.5rem' }}>
                   {approved ? (
-                    !completedTithes.has(cl?.id ?? '') && (
-                      <div style={{
-                        background: '#fefce8', border: '1px solid #fde047',
-                        borderRadius: '0.75rem', padding: '1rem',
-                        display: 'flex', alignItems: 'center', gap: '0.75rem',
-                        color: '#854d0e', fontWeight: 600,
-                      }}>
-                        <span style={{ fontSize: '1.25rem' }}>⏳</span>
-                        {`Allowance approved — ${formatMoney(total)} waiting for tithe decision`}
+                    <>
+                      {!completedTithes.has(cl?.id ?? '') && (
+                        <div style={{
+                          background: '#fefce8', border: '1px solid #fde047',
+                          borderRadius: '0.75rem', padding: '1rem', marginBottom: '1.25rem',
+                          display: 'flex', alignItems: 'center', gap: '0.75rem',
+                          color: '#854d0e', fontWeight: 600,
+                        }}>
+                          <span style={{ fontSize: '1.25rem' }}>⏳</span>
+                          {`Allowance approved — ${formatMoney(total)} waiting for tithe decision`}
+                        </div>
+                      )}
+                      {/* Part 1: read-only reset */}
+                      <div style={{ marginBottom: '1.25rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                          <span style={{ background: '#dbeafe', color: '#1d4ed8', fontSize: '0.75rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px' }}>
+                            PART 1 — Required
+                          </span>
+                          <span style={{ fontSize: '0.8rem', color: '#64748b' }}>All checked = {formatMoney(defaultAllowance)}</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                          {reqItems.map(item => {
+                            const chore = item.chore_templates
+                            if (!chore) return null
+                            return (
+                              <div key={item.id} style={{
+                                display: 'flex', alignItems: 'center', gap: '0.75rem',
+                                padding: '0.625rem 0.875rem', background: '#f8fafc',
+                                borderRadius: '0.625rem', border: '1px solid #e2e8f0',
+                              }}>
+                                <input type="checkbox" checked={false} disabled style={{ width: '17px', height: '17px' }} />
+                                <span style={{ fontWeight: 500, flex: 1, color: '#94a3b8' }}>{chore.name}</span>
+                              </div>
+                            )
+                          })}
+                          {reqItems.length === 0 && (
+                            <p style={{ color: '#94a3b8', fontSize: '0.875rem', padding: '0.5rem 0' }}>
+                              No required chores assigned. Go to Settings to assign chores.
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    )
+                      {/* Part 2: read-only reset */}
+                      {extrasForChild.length > 0 && (
+                        <div style={{ marginBottom: '1.25rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                            <span style={{ background: '#fef3c7', color: '#d97706', fontSize: '0.75rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px' }}>
+                              PART 2 — Extra Rewards
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                            {extrasForChild.map(chore => (
+                              <div key={chore.id} style={{
+                                display: 'flex', alignItems: 'center', gap: '0.5rem',
+                                padding: '0.625rem 0.875rem', background: '#f8fafc',
+                                borderRadius: '0.625rem', border: '1px solid #e2e8f0',
+                              }}>
+                                <span style={{ fontWeight: 500, flex: 1, fontSize: '0.9rem', color: '#94a3b8' }}>{chore.name}</span>
+                                <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{formatMoney(chore.reward_amount ?? 0)}/session</span>
+                                <span style={{ background: '#f1f5f9', color: '#94a3b8', fontSize: '0.95rem', fontWeight: 700, minWidth: '1.5rem', textAlign: 'center' }}>0</span>
+                                <span style={{ background: '#f1f5f9', color: '#94a3b8', fontSize: '0.8rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: '999px', minWidth: '2.75rem', textAlign: 'right' }}>+$0</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                      {/* Approved footer */}
+                      <div style={{
+                        background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '0.75rem',
+                        padding: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem',
+                        color: '#15803d', fontWeight: 600,
+                      }}>
+                        <span>✅</span>
+                        <span>Week approved — next checklist opens on Saturday</span>
+                      </div>
+                    </>
                   ) : (
                     <>
+                      {!isSaturday && (
+                        <div style={{
+                          background: '#f8fafc', border: '1px solid #e2e8f0',
+                          borderRadius: '0.75rem', padding: '0.75rem 1rem',
+                          color: '#64748b', fontSize: '0.875rem', marginBottom: '1.25rem',
+                        }}>
+                          📅 Checklist can only be checked and approved on Saturday
+                        </div>
+                      )}
                       {/* Part 1: Required */}
                       <div style={{ marginBottom: '1.25rem' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
@@ -643,13 +722,14 @@ export default function ChildrenPage() {
                                 display: 'flex', alignItems: 'center', gap: '0.75rem',
                                 padding: '0.625rem 0.875rem',
                                 background: item.checked ? '#f0fdf4' : '#f8fafc',
-                                borderRadius: '0.625rem', cursor: 'pointer',
+                                borderRadius: '0.625rem', cursor: isSaturday ? 'pointer' : 'default',
                                 border: `1px solid ${item.checked ? '#bbf7d0' : '#e2e8f0'}`,
                                 transition: 'all 0.15s',
                               }}>
                                 <input type="checkbox" checked={item.checked}
-                                  onChange={e => toggleItem(child.id, item.id, chore, e.target.checked)}
-                                  style={{ width: '17px', height: '17px', cursor: 'pointer', accentColor: '#16a34a' }} />
+                                  onChange={e => isSaturday && toggleItem(child.id, item.id, chore, e.target.checked)}
+                                  disabled={!isSaturday}
+                                  style={{ width: '17px', height: '17px', cursor: isSaturday ? 'pointer' : 'not-allowed', accentColor: '#16a34a' }} />
                                 <span style={{ fontWeight: 500, flex: 1 }}>{chore.name}</span>
                                 {item.checked && <span style={{ color: '#16a34a', fontSize: '0.85rem', fontWeight: 600 }}>✓</span>}
                               </label>
@@ -668,117 +748,110 @@ export default function ChildrenPage() {
                         )}
                       </div>
 
-                      {/* Part 2: Extra */}
-                      {(() => {
-                        const assignedIds = assignments[child.id]
-                        const extrasForChild = chores.filter(c =>
-                          c.type === 'extra' && (assignedIds && assignedIds.length > 0 ? assignedIds.includes(c.id) : true)
-                        )
-                        if (extrasForChild.length === 0) return null
-                        return (
-                          <div style={{ marginBottom: '1.25rem' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                              <span style={{ background: '#fef3c7', color: '#d97706', fontSize: '0.75rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px' }}>
-                                PART 2 — Extra Rewards
-                              </span>
-                              <span style={{ fontSize: '0.8rem', color: '#64748b' }}>From child records — adjust if needed</span>
-                            </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                              {extrasForChild.map(chore => {
-                                const item = extraItems.find(i => i.chore_id === chore.id)
-                                if (!item) return null
-                                const count = item.count ?? 0
-                                const earned = count * (chore.reward_amount ?? 0)
-                                const logKey = `${child.id}-${chore.id}`
-                                const logs = taskLogs[logKey] ?? []
-                                const isExpanded = expandedLogs[logKey] ?? false
-                                return (
-                                  <div key={chore.id} style={{ border: `1px solid ${count > 0 ? '#fde68a' : '#e2e8f0'}`, borderRadius: '0.625rem', overflow: 'hidden' }}>
-                                    <div style={{
-                                      display: 'flex', alignItems: 'center', gap: '0.5rem',
-                                      padding: '0.625rem 0.875rem',
-                                      background: count > 0 ? '#fffbeb' : '#f8fafc',
-                                    }}>
-                                      <span style={{ fontWeight: 500, flex: 1, fontSize: '0.9rem' }}>{chore.name}</span>
-                                      <span style={{ fontSize: '0.75rem', color: '#94a3b8', flexShrink: 0 }}>{formatMoney(chore.reward_amount ?? 0)}/session</span>
-                                      {/* Child log badge */}
-                                      <button
-                                        onClick={() => setExpandedLogs(prev => ({ ...prev, [logKey]: !isExpanded }))}
-                                        style={{
-                                          display: 'flex', alignItems: 'center', gap: '0.25rem',
-                                          background: logs.length > 0 ? '#e0f2fe' : '#f1f5f9',
-                                          color: logs.length > 0 ? '#0369a1' : '#94a3b8',
-                                          border: 'none', borderRadius: '999px',
-                                          padding: '0.2rem 0.55rem',
-                                          fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', flexShrink: 0,
-                                        }}
-                                      >
-                                        📱 {logs.length} <span style={{ fontSize: '0.55rem' }}>{isExpanded ? '▲' : '▼'}</span>
-                                      </button>
-                                      {/* +/- controls */}
-                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', flexShrink: 0 }}>
-                                        <button
-                                          onClick={() => setExtraCount(child.id, item.id, chore, count - 1)}
-                                          disabled={count === 0}
-                                          style={{
-                                            width: '24px', height: '24px', borderRadius: '50%',
-                                            border: '1.5px solid #e2e8f0', background: 'white',
-                                            fontSize: '0.95rem', fontWeight: 700,
-                                            cursor: count === 0 ? 'not-allowed' : 'pointer',
-                                            opacity: count === 0 ? 0.35 : 1, color: '#374151',
-                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                          }}
-                                        >−</button>
-                                        <span style={{
-                                          minWidth: '1.5rem', textAlign: 'center',
-                                          fontWeight: 700, fontSize: '0.95rem',
-                                          color: count > 0 ? '#d97706' : '#94a3b8',
-                                        }}>{count}</span>
-                                        <button
-                                          onClick={() => setExtraCount(child.id, item.id, chore, count + 1)}
-                                          style={{
-                                            width: '24px', height: '24px', borderRadius: '50%',
-                                            border: '1.5px solid #e2e8f0', background: 'white',
-                                            fontSize: '0.95rem', fontWeight: 700, cursor: 'pointer', color: '#374151',
-                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                          }}
-                                        >+</button>
-                                      </div>
-                                      <span style={{
-                                        background: count > 0 ? '#fef3c7' : '#f1f5f9',
-                                        color: count > 0 ? '#d97706' : '#94a3b8',
-                                        fontSize: '0.8rem', fontWeight: 700,
-                                        padding: '0.15rem 0.5rem', borderRadius: '999px',
-                                        minWidth: '2.75rem', textAlign: 'right', flexShrink: 0,
-                                      }}>+{formatMoney(earned)}</span>
-                                    </div>
-                                    {/* Expandable log */}
-                                    {isExpanded && (
-                                      <div style={{ borderTop: '1px solid #e2e8f0', background: 'white' }}>
-                                        {logs.length === 0 ? (
-                                          <div style={{ padding: '0.5rem 0.875rem', fontSize: '0.78rem', color: '#94a3b8' }}>
-                                            No sessions recorded by child this week.
-                                          </div>
-                                        ) : (
-                                          logs.map((log, i) => (
-                                            <div key={log.id} style={{
-                                              padding: '0.35rem 0.875rem',
-                                              borderBottom: i < logs.length - 1 ? '1px solid #f8fafc' : 'none',
-                                              fontSize: '0.75rem', color: '#64748b',
-                                            }}>
-                                              Session {logs.length - i} · {formatDateTime(log.logged_at)}
-                                            </div>
-                                          ))
-                                        )}
-                                      </div>
-                                    )}
-                                  </div>
-                                )
-                              })}
-                            </div>
+                      {/* Part 2: Extra Rewards */}
+                      {extrasForChild.length > 0 && (
+                        <div style={{ marginBottom: '1.25rem' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
+                            <span style={{ background: '#fef3c7', color: '#d97706', fontSize: '0.75rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px' }}>
+                              PART 2 — Extra Rewards
+                            </span>
+                            <span style={{ fontSize: '0.8rem', color: '#64748b' }}>From child records — adjust if needed</span>
                           </div>
-                        )
-                      })()}
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                            {extrasForChild.map(chore => {
+                              const item = extraItems.find(i => i.chore_id === chore.id)
+                              if (!item) return null
+                              const count = item.count ?? 0
+                              const earned = count * (chore.reward_amount ?? 0)
+                              const logKey = `${child.id}-${chore.id}`
+                              const logs = taskLogs[logKey] ?? []
+                              const isExpanded = expandedLogs[logKey] ?? false
+                              return (
+                                <div key={chore.id} style={{ border: `1px solid ${count > 0 ? '#fde68a' : '#e2e8f0'}`, borderRadius: '0.625rem', overflow: 'hidden' }}>
+                                  <div style={{
+                                    display: 'flex', alignItems: 'center', gap: '0.5rem',
+                                    padding: '0.625rem 0.875rem',
+                                    background: count > 0 ? '#fffbeb' : '#f8fafc',
+                                  }}>
+                                    <span style={{ fontWeight: 500, flex: 1, fontSize: '0.9rem' }}>{chore.name}</span>
+                                    <span style={{ fontSize: '0.75rem', color: '#94a3b8', flexShrink: 0 }}>{formatMoney(chore.reward_amount ?? 0)}/session</span>
+                                    <button
+                                      onClick={() => setExpandedLogs(prev => ({ ...prev, [logKey]: !isExpanded }))}
+                                      style={{
+                                        display: 'flex', alignItems: 'center', gap: '0.25rem',
+                                        background: logs.length > 0 ? '#e0f2fe' : '#f1f5f9',
+                                        color: logs.length > 0 ? '#0369a1' : '#94a3b8',
+                                        border: 'none', borderRadius: '999px',
+                                        padding: '0.2rem 0.55rem',
+                                        fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', flexShrink: 0,
+                                      }}
+                                    >
+                                      📱 {logs.length} <span style={{ fontSize: '0.55rem' }}>{isExpanded ? '▲' : '▼'}</span>
+                                    </button>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem', flexShrink: 0 }}>
+                                      <button
+                                        onClick={() => setExtraCount(child.id, item.id, chore, count - 1)}
+                                        disabled={!isSaturday || count === 0}
+                                        style={{
+                                          width: '24px', height: '24px', borderRadius: '50%',
+                                          border: '1.5px solid #e2e8f0', background: 'white',
+                                          fontSize: '0.95rem', fontWeight: 700,
+                                          cursor: (!isSaturday || count === 0) ? 'not-allowed' : 'pointer',
+                                          opacity: (!isSaturday || count === 0) ? 0.35 : 1, color: '#374151',
+                                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        }}
+                                      >−</button>
+                                      <span style={{
+                                        minWidth: '1.5rem', textAlign: 'center',
+                                        fontWeight: 700, fontSize: '0.95rem',
+                                        color: count > 0 ? '#d97706' : '#94a3b8',
+                                      }}>{count}</span>
+                                      <button
+                                        onClick={() => setExtraCount(child.id, item.id, chore, count + 1)}
+                                        disabled={!isSaturday}
+                                        style={{
+                                          width: '24px', height: '24px', borderRadius: '50%',
+                                          border: '1.5px solid #e2e8f0', background: 'white',
+                                          fontSize: '0.95rem', fontWeight: 700,
+                                          cursor: isSaturday ? 'pointer' : 'not-allowed',
+                                          opacity: isSaturday ? 1 : 0.35, color: '#374151',
+                                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                        }}
+                                      >+</button>
+                                    </div>
+                                    <span style={{
+                                      background: count > 0 ? '#fef3c7' : '#f1f5f9',
+                                      color: count > 0 ? '#d97706' : '#94a3b8',
+                                      fontSize: '0.8rem', fontWeight: 700,
+                                      padding: '0.15rem 0.5rem', borderRadius: '999px',
+                                      minWidth: '2.75rem', textAlign: 'right', flexShrink: 0,
+                                    }}>+{formatMoney(earned)}</span>
+                                  </div>
+                                  {isExpanded && (
+                                    <div style={{ borderTop: '1px solid #e2e8f0', background: 'white' }}>
+                                      {logs.length === 0 ? (
+                                        <div style={{ padding: '0.5rem 0.875rem', fontSize: '0.78rem', color: '#94a3b8' }}>
+                                          No sessions recorded by child this week.
+                                        </div>
+                                      ) : (
+                                        logs.map((log, i) => (
+                                          <div key={log.id} style={{
+                                            padding: '0.35rem 0.875rem',
+                                            borderBottom: i < logs.length - 1 ? '1px solid #f8fafc' : 'none',
+                                            fontSize: '0.75rem', color: '#64748b',
+                                          }}>
+                                            Session {logs.length - i} · {formatDateTime(log.logged_at)}
+                                          </div>
+                                        ))
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        </div>
+                      )}
 
                       {/* Summary + approve */}
                       <div style={{
@@ -804,9 +877,9 @@ export default function ChildrenPage() {
                         <button
                           className="btn-primary"
                           onClick={() => approveAllowance(child)}
-                          disabled={checklistSaving === child.id || total === 0}
+                          disabled={checklistSaving === child.id || total === 0 || !isSaturday}
                         >
-                          {checklistSaving === child.id ? 'Approving...' : `Approve & Pay ${formatMoney(total)}`}
+                          {checklistSaving === child.id ? 'Approving...' : !isSaturday ? 'Available on Saturday' : `Approve & Pay ${formatMoney(total)}`}
                         </button>
                       </div>
                     </>
