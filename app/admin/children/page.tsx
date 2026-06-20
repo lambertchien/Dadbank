@@ -387,6 +387,54 @@ export default function ChildrenPage() {
     setTimeout(() => setMsg(''), 3000)
   }
 
+  async function toggleMissedItem(childId: string, missedCl: ChecklistWithItems, itemId: string, chore: ChoreTemplate, checked: boolean) {
+    await supabase.from('checklist_items').update({ checked, reward_earned: 0, count: 0 }).eq('id', itemId)
+    const updatedItems = missedCl.checklist_items.map(i =>
+      i.id === itemId ? { ...i, checked, reward_earned: 0, count: 0 } : i
+    )
+    const reqAll = updatedItems.filter(i => i.chore_templates?.type === 'required').every(i => i.checked)
+    const baseAmount = reqAll && updatedItems.filter(i => i.chore_templates?.type === 'required').length > 0 ? defaultAllowance : 0
+    const extraAmount = updatedItems.filter(i => i.chore_templates?.type === 'extra').reduce((s, i) => s + i.reward_earned, 0)
+    await supabase.from('weekly_checklists').update({ base_amount: baseAmount, extra_amount: extraAmount }).eq('id', missedCl.id)
+    setMissedChecklists(prev => ({
+      ...prev,
+      [childId]: (prev[childId] ?? []).map(c =>
+        c.id === missedCl.id ? { ...c, base_amount: baseAmount, extra_amount: extraAmount, checklist_items: updatedItems } as ChecklistWithItems : c
+      ),
+    }))
+  }
+
+  async function setMissedExtraCount(childId: string, missedCl: ChecklistWithItems, itemId: string, chore: ChoreTemplate, count: number) {
+    const reward = count * (chore.reward_amount ?? 0)
+    await supabase.from('checklist_items').update({ count, checked: count > 0, reward_earned: reward, admin_adjusted: true }).eq('id', itemId)
+    const updatedItems = missedCl.checklist_items.map(i =>
+      i.id === itemId ? { ...i, count, checked: count > 0, reward_earned: reward } : i
+    )
+    const reqAll = updatedItems.filter(i => i.chore_templates?.type === 'required').every(i => i.checked)
+    const baseAmount = reqAll && updatedItems.filter(i => i.chore_templates?.type === 'required').length > 0 ? defaultAllowance : 0
+    const extraAmount = updatedItems.filter(i => i.chore_templates?.type === 'extra').reduce((s, i) => s + i.reward_earned, 0)
+    await supabase.from('weekly_checklists').update({ base_amount: baseAmount, extra_amount: extraAmount }).eq('id', missedCl.id)
+    setMissedChecklists(prev => ({
+      ...prev,
+      [childId]: (prev[childId] ?? []).map(c =>
+        c.id === missedCl.id ? { ...c, base_amount: baseAmount, extra_amount: extraAmount, checklist_items: updatedItems } as ChecklistWithItems : c
+      ),
+    }))
+  }
+
+  async function dismissMissedWeek(child: Profile, missedCl: ChecklistWithItems) {
+    setMissedSaving(missedCl.id)
+    const { data: { user } } = await supabase.auth.getUser()
+    await supabase.from('weekly_checklists').update({
+      status: 'approved',
+      approved_by: user?.id,
+      approved_at: new Date().toISOString(),
+    }).eq('id', missedCl.id)
+    await supabase.from('extra_task_logs').delete().eq('child_id', child.id).eq('week_start', missedCl.week_start)
+    load()
+    setMissedSaving(null)
+  }
+
   async function approveMissedAllowance(child: Profile, missedCl: ChecklistWithItems) {
     setMissedSaving(missedCl.id)
     setMsg('')
@@ -662,40 +710,167 @@ export default function ChildrenPage() {
               {/* Checklist section */}
               {section === 'checklist' && (
                 <div style={{ padding: '1.5rem' }}>
-                  {/* Missed weeks — show oldest first, each can be approved independently */}
+                  {/* Missed weeks — full checklist per week, oldest first */}
                   {(missedChecklists[child.id] ?? []).map(missedCl => {
                     const missedTotal = missedCl.base_amount + missedCl.extra_amount
                     const missedReqItems = missedCl.checklist_items.filter(i => i.chore_templates?.type === 'required')
                     const missedExtraItems = missedCl.checklist_items.filter(i => i.chore_templates?.type === 'extra')
-                    const missedReqDone = missedReqItems.filter(i => i.checked).length
-                    const weekLabel = new Date(missedCl.week_start + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric' })
+                    const missedReqAllChecked = missedReqItems.length > 0 && missedReqItems.every(i => i.checked)
+                    const weekLabel = new Date(missedCl.week_start + 'T12:00:00').toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
                     return (
-                      <div key={missedCl.id} style={{
-                        background: '#fefce8', border: '1px solid #fde047',
-                        borderRadius: '0.75rem', padding: '1rem', marginBottom: '1rem',
-                      }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                          <span style={{ fontSize: '1.1rem' }}>⚠️</span>
-                          <div style={{ flex: 1 }}>
-                            <div style={{ fontWeight: 700, color: '#854d0e', fontSize: '0.9rem' }}>
-                              Unapproved — week of {weekLabel}
-                            </div>
-                            <div style={{ fontSize: '0.78rem', color: '#92400e', marginTop: '0.2rem' }}>
-                              Part 1: {missedReqDone}/{missedReqItems.length} done
-                              {missedExtraItems.some(i => (i.count ?? 0) > 0) && (
-                                <span> · Extras: {missedExtraItems.filter(i => (i.count ?? 0) > 0).map(i => `${i.chore_templates?.name} ×${i.count}`).join(', ')}</span>
-                              )}
-                              <span style={{ marginLeft: '0.5rem', fontWeight: 700 }}>→ Total: {formatMoney(missedTotal)}</span>
-                            </div>
+                      <div key={missedCl.id} style={{ border: '2px solid #fde047', borderRadius: '0.75rem', overflow: 'hidden', marginBottom: '1.25rem' }}>
+                        {/* Missed week header */}
+                        <div style={{ background: '#fefce8', padding: '0.75rem 1rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <span>⚠️</span>
+                          <div style={{ fontWeight: 700, color: '#854d0e', flex: 1, fontSize: '0.9rem' }}>
+                            Unapproved — week of {weekLabel}
                           </div>
                           <button
-                            className="btn-primary"
-                            onClick={() => approveMissedAllowance(child, missedCl)}
-                            disabled={missedSaving === missedCl.id || missedTotal === 0}
-                            style={{ fontSize: '0.85rem', padding: '0.375rem 0.875rem', flexShrink: 0 }}
+                            onClick={() => dismissMissedWeek(child, missedCl)}
+                            disabled={missedSaving === missedCl.id}
+                            style={{
+                              background: 'white', border: '1px solid #e2e8f0', borderRadius: '0.5rem',
+                              padding: '0.3rem 0.75rem', fontSize: '0.78rem', color: '#64748b',
+                              cursor: 'pointer', fontWeight: 600,
+                            }}
                           >
-                            {missedSaving === missedCl.id ? 'Approving...' : `Approve ${formatMoney(missedTotal)}`}
+                            Dismiss (already paid)
                           </button>
+                        </div>
+
+                        {/* Missed week body */}
+                        <div style={{ padding: '1rem', background: 'white' }}>
+                          {/* Part 1 */}
+                          <div style={{ marginBottom: '1rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.6rem' }}>
+                              <span style={{ background: '#dbeafe', color: '#1d4ed8', fontSize: '0.72rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: '999px' }}>
+                                PART 1 — Required
+                              </span>
+                              <span style={{ fontSize: '0.78rem', color: '#64748b' }}>All checked = {formatMoney(defaultAllowance)}</span>
+                            </div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                              {missedReqItems.map(item => {
+                                const chore = item.chore_templates
+                                if (!chore) return null
+                                return (
+                                  <label key={item.id} style={{
+                                    display: 'flex', alignItems: 'center', gap: '0.75rem',
+                                    padding: '0.5rem 0.75rem',
+                                    background: item.checked ? '#f0fdf4' : '#f8fafc',
+                                    borderRadius: '0.5rem', cursor: 'pointer',
+                                    border: `1px solid ${item.checked ? '#bbf7d0' : '#e2e8f0'}`,
+                                  }}>
+                                    <input type="checkbox" checked={item.checked}
+                                      onChange={e => toggleMissedItem(child.id, missedCl, item.id, chore, e.target.checked)}
+                                      style={{ width: '16px', height: '16px', cursor: 'pointer', accentColor: '#16a34a' }} />
+                                    <span style={{ fontWeight: 500, flex: 1, fontSize: '0.875rem' }}>{chore.name}</span>
+                                    {item.checked && <span style={{ color: '#16a34a', fontSize: '0.8rem', fontWeight: 600 }}>✓</span>}
+                                  </label>
+                                )
+                              })}
+                              {missedReqItems.length === 0 && (
+                                <p style={{ color: '#94a3b8', fontSize: '0.825rem', padding: '0.25rem 0' }}>No required chores.</p>
+                              )}
+                            </div>
+                            {missedReqAllChecked && (
+                              <div style={{ marginTop: '0.4rem', fontSize: '0.8rem', color: '#15803d', fontWeight: 600 }}>
+                                ✅ All done! Base: {formatMoney(defaultAllowance)}
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Part 2 */}
+                          {extrasForChild.length > 0 && (
+                            <div style={{ marginBottom: '1rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.6rem' }}>
+                                <span style={{ background: '#fef3c7', color: '#d97706', fontSize: '0.72rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: '999px' }}>
+                                  PART 2 — Extra Rewards
+                                </span>
+                              </div>
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                {extrasForChild.map(chore => {
+                                  const item = missedExtraItems.find(i => i.chore_id === chore.id)
+                                  if (!item) return null
+                                  const count = item.count ?? 0
+                                  const earned = count * (chore.reward_amount ?? 0)
+                                  return (
+                                    <div key={chore.id} style={{
+                                      display: 'flex', alignItems: 'center', gap: '0.5rem',
+                                      padding: '0.5rem 0.75rem',
+                                      background: count > 0 ? '#fffbeb' : '#f8fafc',
+                                      borderRadius: '0.5rem',
+                                      border: `1px solid ${count > 0 ? '#fde68a' : '#e2e8f0'}`,
+                                    }}>
+                                      <span style={{ fontWeight: 500, flex: 1, fontSize: '0.875rem' }}>{chore.name}</span>
+                                      <span style={{ fontSize: '0.72rem', color: '#94a3b8' }}>{formatMoney(chore.reward_amount ?? 0)}/session</span>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                                        <button
+                                          onClick={() => setMissedExtraCount(child.id, missedCl, item.id, chore, count - 1)}
+                                          disabled={count === 0}
+                                          style={{
+                                            width: '22px', height: '22px', borderRadius: '50%',
+                                            border: '1.5px solid #e2e8f0', background: 'white',
+                                            fontSize: '0.9rem', fontWeight: 700,
+                                            cursor: count === 0 ? 'not-allowed' : 'pointer',
+                                            opacity: count === 0 ? 0.35 : 1, color: '#374151',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                          }}
+                                        >−</button>
+                                        <span style={{ minWidth: '1.25rem', textAlign: 'center', fontWeight: 700, fontSize: '0.9rem', color: count > 0 ? '#d97706' : '#94a3b8' }}>{count}</span>
+                                        <button
+                                          onClick={() => setMissedExtraCount(child.id, missedCl, item.id, chore, count + 1)}
+                                          style={{
+                                            width: '22px', height: '22px', borderRadius: '50%',
+                                            border: '1.5px solid #e2e8f0', background: 'white',
+                                            fontSize: '0.9rem', fontWeight: 700, cursor: 'pointer', color: '#374151',
+                                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                          }}
+                                        >+</button>
+                                      </div>
+                                      <span style={{
+                                        background: count > 0 ? '#fef3c7' : '#f1f5f9',
+                                        color: count > 0 ? '#d97706' : '#94a3b8',
+                                        fontSize: '0.78rem', fontWeight: 700,
+                                        padding: '0.1rem 0.45rem', borderRadius: '999px',
+                                        minWidth: '2.5rem', textAlign: 'right',
+                                      }}>+{formatMoney(earned)}</span>
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Summary + Approve */}
+                          <div style={{
+                            background: '#f8fafc', borderRadius: '0.625rem',
+                            padding: '0.875rem', display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap',
+                          }}>
+                            <div style={{ flex: 1, display: 'flex', gap: '1.25rem', flexWrap: 'wrap' }}>
+                              <div>
+                                <div style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 600 }}>Base</div>
+                                <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{formatMoney(missedCl.base_amount)}</div>
+                              </div>
+                              {missedCl.extra_amount > 0 && (
+                                <div>
+                                  <div style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 600 }}>Extras</div>
+                                  <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#d97706' }}>{formatMoney(missedCl.extra_amount)}</div>
+                                </div>
+                              )}
+                              <div>
+                                <div style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 600 }}>Total</div>
+                                <div style={{ fontWeight: 700, fontSize: '1rem', color: '#16a34a' }}>{formatMoney(missedTotal)}</div>
+                              </div>
+                            </div>
+                            <button
+                              className="btn-primary"
+                              onClick={() => approveMissedAllowance(child, missedCl)}
+                              disabled={missedSaving === missedCl.id || missedTotal === 0}
+                              style={{ fontSize: '0.875rem' }}
+                            >
+                              {missedSaving === missedCl.id ? 'Approving...' : `Approve & Pay ${formatMoney(missedTotal)}`}
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )
