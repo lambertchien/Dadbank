@@ -50,7 +50,7 @@ function getTodayStr() {
 
 type ChecklistWithItems = WeeklyChecklist & { checklist_items: (ChecklistItem & { chore_templates: ChoreTemplate })[] }
 type WRWithProfile = WithdrawalRequest & { profiles: { name: string; balance: number } }
-type SectionKey = 'checklist' | 'withdrawals' | 'adjust' | 'history' | 'password'
+type SectionKey = 'checklist' | 'withdrawals' | 'adjust' | 'history' | 'weeks' | 'password'
 type AdjustForm = { amount: string; description: string; type: 'deposit' | 'adjustment'; tithe: boolean }
 type ManualTitheRecord = { id: string; income_amount: number; completed: boolean; description: string | null; created_at: string }
 
@@ -98,6 +98,11 @@ export default function ChildrenPage() {
   const [childHistory, setChildHistory] = useState<Record<string, Transaction[]>>({})
   const [historyLoading, setHistoryLoading] = useState<Set<string>>(new Set())
   const [historyFilters, setHistoryFilters] = useState<Record<string, { type: string; span: number }>>({})
+
+  const [weekHistory, setWeekHistory] = useState<Record<string, ChecklistWithItems[]>>({})
+  const [weekHistoryLoading, setWeekHistoryLoading] = useState<Set<string>>(new Set())
+  const [adminNames, setAdminNames] = useState<Record<string, string>>({})
+  const [expandedWeeks, setExpandedWeeks] = useState<Record<string, boolean>>({})
 
   const [resetPasswords, setResetPasswords] = useState<Record<string, string>>({})
   const [resetSaving, setResetSaving] = useState<string | null>(null)
@@ -617,6 +622,40 @@ export default function ChildrenPage() {
     setHistoryLoading(prev => { const s = new Set(prev); s.delete(childId); return s })
   }
 
+  async function loadWeekHistory(childId: string) {
+    if (weekHistory[childId] !== undefined || weekHistoryLoading.has(childId)) return
+    setWeekHistoryLoading(prev => new Set(prev).add(childId))
+
+    // Last 12 weeks
+    const cutoff = new Date()
+    cutoff.setDate(cutoff.getDate() - 84)
+    const y = cutoff.getFullYear()
+    const m = String(cutoff.getMonth() + 1).padStart(2, '0')
+    const d = String(cutoff.getDate()).padStart(2, '0')
+    const cutoffStr = `${y}-${m}-${d}`
+
+    const { data } = await supabase
+      .from('weekly_checklists')
+      .select('*, checklist_items(*, chore_templates(*))')
+      .eq('child_id', childId)
+      .eq('status', 'approved')
+      .gte('week_start', cutoffStr)
+      .order('week_start', { ascending: false })
+
+    const weeks = (data ?? []) as ChecklistWithItems[]
+    setWeekHistory(prev => ({ ...prev, [childId]: weeks }))
+
+    // Resolve any approver names we haven't cached yet
+    const unknownIds = [...new Set(weeks.map(w => w.approved_by).filter((id): id is string => !!id))]
+      .filter(id => !adminNames[id])
+    if (unknownIds.length > 0) {
+      const { data: profiles } = await supabase.from('profiles').select('id, name').in('id', unknownIds)
+      if (profiles) setAdminNames(prev => ({ ...prev, ...Object.fromEntries(profiles.map(p => [p.id, p.name])) }))
+    }
+
+    setWeekHistoryLoading(prev => { const s = new Set(prev); s.delete(childId); return s })
+  }
+
   async function resetPassword(child: Profile) {
     const password = resetPasswords[child.id] ?? ''
     if (password.length < 6) { setMsg('Password must be at least 6 characters'); return }
@@ -708,6 +747,12 @@ export default function ChildrenPage() {
               badgeBg: '', badgeColor: '',
             },
             {
+              key: 'weeks' as SectionKey,
+              label: '📅 Weeks',
+              badge: null,
+              badgeBg: '', badgeColor: '',
+            },
+            {
               key: 'password' as SectionKey,
               label: '🔑 Password',
               badge: null,
@@ -747,6 +792,7 @@ export default function ChildrenPage() {
                     onClick={() => {
                       setActiveSection(prev => ({ ...prev, [child.id]: prev[child.id] === tab.key ? null : tab.key }))
                       if (tab.key === 'history') loadHistory(child.id)
+                      if (tab.key === 'weeks') loadWeekHistory(child.id)
                     }}
                     style={{
                       flex: 1, padding: '0.75rem 0.5rem',
@@ -1326,6 +1372,130 @@ export default function ChildrenPage() {
                   </div>
                 </div>
               )}
+
+              {/* Weeks (allowance history) section */}
+              {section === 'weeks' && (() => {
+                const weeks = weekHistory[child.id]
+                return (
+                  <div style={{ padding: '1.5rem' }}>
+                    {weekHistoryLoading.has(child.id) ? (
+                      <p style={{ color: '#94a3b8', textAlign: 'center', padding: '1.5rem 0' }}>Loading...</p>
+                    ) : !weeks || weeks.length === 0 ? (
+                      <p style={{ color: '#94a3b8', textAlign: 'center', padding: '1.5rem 0' }}>No approved weeks in the last 3 months.</p>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
+                        {weeks.map(week => {
+                          const isOpen = expandedWeeks[week.id] ?? false
+                          const weekLabel = new Date(week.week_start + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                          const approvedLabel = week.approved_at
+                            ? new Date(week.approved_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                            : null
+                          const approverName = week.approved_by ? (adminNames[week.approved_by] ?? '…') : null
+                          const total = week.base_amount + week.extra_amount
+                          const reqItems = (week.checklist_items ?? []).filter(i => i.chore_templates?.type === 'required')
+                          const extraItems = (week.checklist_items ?? []).filter(i => i.chore_templates?.type === 'extra' && i.reward_earned > 0)
+
+                          return (
+                            <div key={week.id} style={{ border: '1px solid #e2e8f0', borderRadius: '0.875rem', overflow: 'hidden' }}>
+                              {/* Header row — always visible */}
+                              <button
+                                onClick={() => setExpandedWeeks(prev => ({ ...prev, [week.id]: !isOpen }))}
+                                style={{
+                                  width: '100%', display: 'flex', alignItems: 'center', gap: '0.75rem',
+                                  padding: '0.75rem 1rem', background: '#f8fafc',
+                                  border: 'none', cursor: 'pointer', textAlign: 'left',
+                                }}
+                              >
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#1e293b' }}>
+                                    Week of {weekLabel}
+                                  </div>
+                                  <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.1rem' }}>
+                                    {approvedLabel && approverName
+                                      ? `Approved ${approvedLabel} · by ${approverName}`
+                                      : approvedLabel
+                                        ? `Approved ${approvedLabel}`
+                                        : 'Approved'}
+                                  </div>
+                                </div>
+                                <div style={{ fontWeight: 700, fontSize: '1rem', color: '#16a34a', flexShrink: 0 }}>
+                                  {formatMoney(total)}
+                                </div>
+                                <span style={{ fontSize: '0.7rem', color: '#94a3b8', flexShrink: 0 }}>
+                                  {isOpen ? '▲' : '▼'}
+                                </span>
+                              </button>
+
+                              {/* Expanded detail */}
+                              {isOpen && (
+                                <div style={{ padding: '1rem', borderTop: '1px solid #e2e8f0', background: 'white' }}>
+                                  {/* Part I */}
+                                  <div style={{ marginBottom: '0.875rem' }}>
+                                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#1d4ed8', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
+                                      Part I — Required Chores
+                                    </div>
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                                      {reqItems.map(item => (
+                                        <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem' }}>
+                                          <span style={{ color: item.checked ? '#16a34a' : '#dc2626', fontWeight: 700, flexShrink: 0 }}>
+                                            {item.checked ? '✓' : '✗'}
+                                          </span>
+                                          <span style={{ color: item.checked ? '#374151' : '#94a3b8' }}>
+                                            {item.chore_templates?.name ?? '—'}
+                                          </span>
+                                        </div>
+                                      ))}
+                                      {reqItems.length === 0 && (
+                                        <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>No required chores recorded.</span>
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Part II */}
+                                  {extraItems.length > 0 && (
+                                    <div style={{ marginBottom: '0.875rem' }}>
+                                      <div style={{ fontSize: '0.72rem', fontWeight: 700, color: '#d97706', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem' }}>
+                                        Part II — Extra Tasks
+                                      </div>
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                                        {extraItems.map(item => (
+                                          <div key={item.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                                            <span style={{ color: '#374151' }}>
+                                              {item.chore_templates?.name ?? '—'}
+                                              <span style={{ color: '#94a3b8', marginLeft: '0.35rem' }}>
+                                                ×{Math.round(item.reward_earned / (item.chore_templates?.reward_amount ?? 1))}
+                                              </span>
+                                            </span>
+                                            <span style={{ color: '#16a34a', fontWeight: 600 }}>
+                                              +{formatMoney(item.reward_earned)}
+                                            </span>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Totals footer */}
+                                  <div style={{
+                                    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                                    paddingTop: '0.625rem', borderTop: '1px solid #f1f5f9',
+                                    fontSize: '0.82rem', color: '#64748b',
+                                  }}>
+                                    <span>Base {formatMoney(week.base_amount)}{week.extra_amount > 0 ? ` + Extra ${formatMoney(week.extra_amount)}` : ''}</span>
+                                    <span style={{ fontWeight: 700, color: '#1e293b', fontSize: '0.9rem' }}>
+                                      Total {formatMoney(total)}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
 
               {/* History section */}
               {section === 'history' && (() => {
