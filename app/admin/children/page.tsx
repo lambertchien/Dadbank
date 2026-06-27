@@ -29,6 +29,25 @@ function getThisSaturday() {
   return `${y}-${m}-${dd}`
 }
 
+function getNextSaturday() {
+  const d = new Date()
+  const day = d.getDay()
+  const daysToThisSat = day === 6 ? 0 : (6 - day)
+  d.setDate(d.getDate() + daysToThisSat + 7)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
+}
+
+function getTodayStr() {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
+}
+
 type ChecklistWithItems = WeeklyChecklist & { checklist_items: (ChecklistItem & { chore_templates: ChoreTemplate })[] }
 type WRWithProfile = WithdrawalRequest & { profiles: { name: string; balance: number } }
 type SectionKey = 'checklist' | 'withdrawals' | 'adjust' | 'history' | 'password'
@@ -47,6 +66,8 @@ const TX_STYLES: Record<string, { bg: string; color: string; label: string; emoj
 export default function ChildrenPage() {
   const supabase = createClient()
   const weekStart = getThisSaturday()
+  const nextWeekStart = getNextSaturday()
+  const todayStr = getTodayStr()
   const isSaturday = new Date().getDay() === 6
 
   const [children, setChildren] = useState<Profile[]>([])
@@ -59,6 +80,7 @@ export default function ChildrenPage() {
   const [chores, setChores] = useState<ChoreTemplate[]>([])
   const [assignments, setAssignments] = useState<Record<string, string[]>>({})
   const [checklists, setChecklists] = useState<Record<string, ChecklistWithItems>>({})
+  const [nextChecklists, setNextChecklists] = useState<Record<string, ChecklistWithItems>>({})
   const [completedTithes, setCompletedTithes] = useState<Set<string>>(new Set())
   const [defaultAllowance, setDefaultAllowance] = useState(100)
   const [defaultTithePct, setDefaultTithePct] = useState(10)
@@ -82,13 +104,15 @@ export default function ChildrenPage() {
 
   // Extra task logs: keyed by `${childId}-${choreId}`
   const [taskLogs, setTaskLogs] = useState<Record<string, LogEntry[]>>({})
+  const [nextTaskLogs, setNextTaskLogs] = useState<Record<string, LogEntry[]>>({})
   const [expandedLogs, setExpandedLogs] = useState<Record<string, boolean>>({})
 
   const load = useCallback(async () => {
-    const [{ data: ch }, { data: cr }, { data: cl }, { data: settings }, { data: titheSetting }, { data: wr }, { data: asgn }, { data: titheDone }, { data: manualTitheData }, { data: logs }, { data: olderCl }] = await Promise.all([
+    const [{ data: ch }, { data: cr }, { data: cl }, { data: nextCl }, { data: settings }, { data: titheSetting }, { data: wr }, { data: asgn }, { data: titheDone }, { data: manualTitheData }, { data: logs }, { data: nextLogs }, { data: olderCl }] = await Promise.all([
       supabase.from('profiles').select('*').eq('role', 'child').order('name'),
       supabase.from('chore_templates').select('*').eq('active', true).order('type').order('sort_order'),
       supabase.from('weekly_checklists').select('*, checklist_items(*, chore_templates(*))').eq('week_start', weekStart),
+      supabase.from('weekly_checklists').select('*, checklist_items(*, chore_templates(*))').eq('week_start', nextWeekStart),
       supabase.from('app_settings').select('*').eq('key', 'default_allowance').single(),
       supabase.from('app_settings').select('value').eq('key', 'tithe_percentage').single(),
       supabase.from('withdrawal_requests').select('*, profiles(name, balance)').eq('status', 'pending').order('created_at', { ascending: true }),
@@ -96,6 +120,7 @@ export default function ChildrenPage() {
       supabase.from('tithe_records').select('checklist_id').eq('completed', true),
       supabase.from('tithe_records').select('id, child_id, income_amount, completed, description, created_at').is('checklist_id', null).order('created_at', { ascending: false }),
       supabase.from('extra_task_logs').select('id, child_id, chore_id, logged_at').eq('week_start', weekStart).order('logged_at', { ascending: false }),
+      supabase.from('extra_task_logs').select('id, child_id, chore_id, logged_at').eq('week_start', nextWeekStart).order('logged_at', { ascending: false }),
       supabase.from('weekly_checklists').select('*, checklist_items(*, chore_templates(*))').lt('week_start', weekStart).eq('status', 'pending').order('week_start', { ascending: true }),
     ])
 
@@ -146,7 +171,7 @@ export default function ChildrenPage() {
       }))
     }
 
-    // Build log map
+    // Build log maps for this week and next week
     const logMap: Record<string, LogEntry[]> = {}
     for (const log of logs ?? []) {
       const key = `${log.child_id}-${log.chore_id}`
@@ -155,28 +180,42 @@ export default function ChildrenPage() {
     }
     setTaskLogs(logMap)
 
-    // Sync extra task counts from child logs for all pending checklists
+    const nextLogMap: Record<string, LogEntry[]> = {}
+    for (const log of nextLogs ?? []) {
+      const key = `${log.child_id}-${log.chore_id}`
+      if (!nextLogMap[key]) nextLogMap[key] = []
+      nextLogMap[key].push({ id: log.id, logged_at: log.logged_at })
+    }
+    setNextTaskLogs(nextLogMap)
+
+    // Sync extra task counts from child logs for all pending checklists (both weeks)
     const syncBatch: PromiseLike<unknown>[] = []
-    for (const checklist of clList) {
-      if (checklist.status === 'approved') continue
-      let extraDirty = false
-      for (const item of checklist.checklist_items) {
-        if (item.chore_templates?.type !== 'extra') continue
-        if (item.admin_adjusted) continue  // admin has explicitly set this count — don't overwrite
-        const logCount = logMap[`${checklist.child_id}-${item.chore_id}`]?.length ?? 0
-        if (item.count !== logCount) {
-          const reward = logCount * ((item.chore_templates?.reward_amount) ?? (choreMap[item.chore_id]?.reward_amount) ?? 0)
-          item.count = logCount
-          item.checked = logCount > 0
-          item.reward_earned = reward
-          extraDirty = true
-          syncBatch.push(supabase.from('checklist_items').update({ count: logCount, checked: logCount > 0, reward_earned: reward }).eq('id', item.id).then(() => {}))
+    const bothWeeks: [ChecklistWithItems[], Record<string, LogEntry[]>][] = [
+      [clList, logMap],
+      [(nextCl ?? []) as ChecklistWithItems[], nextLogMap],
+    ]
+    for (const [list, lm] of bothWeeks) {
+      for (const checklist of list) {
+        if (checklist.status === 'approved') continue
+        let extraDirty = false
+        for (const item of checklist.checklist_items) {
+          if (item.chore_templates?.type !== 'extra') continue
+          if (item.admin_adjusted) continue  // admin has explicitly set this count — don't overwrite
+          const logCount = lm[`${checklist.child_id}-${item.chore_id}`]?.length ?? 0
+          if (item.count !== logCount) {
+            const reward = logCount * ((item.chore_templates?.reward_amount) ?? (choreMap[item.chore_id]?.reward_amount) ?? 0)
+            item.count = logCount
+            item.checked = logCount > 0
+            item.reward_earned = reward
+            extraDirty = true
+            syncBatch.push(supabase.from('checklist_items').update({ count: logCount, checked: logCount > 0, reward_earned: reward }).eq('id', item.id).then(() => {}))
+          }
         }
-      }
-      if (extraDirty) {
-        const newExtra = checklist.checklist_items.filter(i => i.chore_templates?.type === 'extra').reduce((s, i) => s + i.reward_earned, 0)
-        checklist.extra_amount = newExtra
-        syncBatch.push(supabase.from('weekly_checklists').update({ extra_amount: newExtra }).eq('id', checklist.id).then(() => {}))
+        if (extraDirty) {
+          const newExtra = checklist.checklist_items.filter(i => i.chore_templates?.type === 'extra').reduce((s, i) => s + i.reward_earned, 0)
+          checklist.extra_amount = newExtra
+          syncBatch.push(supabase.from('weekly_checklists').update({ extra_amount: newExtra }).eq('id', checklist.id).then(() => {}))
+        }
       }
     }
     if (syncBatch.length > 0) await Promise.all(syncBatch)
@@ -184,6 +223,10 @@ export default function ChildrenPage() {
     const clMap: Record<string, ChecklistWithItems> = {}
     for (const c of clList) clMap[c.child_id] = c
     setChecklists(clMap)
+
+    const nextClMap: Record<string, ChecklistWithItems> = {}
+    for (const c of (nextCl ?? []) as ChecklistWithItems[]) nextClMap[c.child_id] = c
+    setNextChecklists(nextClMap)
 
     const missedMap: Record<string, ChecklistWithItems[]> = {}
     for (const c of (olderCl ?? []) as ChecklistWithItems[]) {
@@ -202,21 +245,27 @@ export default function ChildrenPage() {
     setManualTithes(manualMap)
 
     setLoading(false)
-  }, [supabase, weekStart])
+  }, [supabase, weekStart, nextWeekStart])
 
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
     if (loading || children.length === 0) return
     children.forEach(child => {
-      const cl = checklists[child.id]
-      const childChores = getChildChores(child.id)
-      if (!cl || cl.checklist_items.length === 0) {
-        ensureChecklist(child.id, childChores.length > 0 ? childChores : undefined)
+      const thisWeekCl = checklists[child.id]
+      const thisApproved = thisWeekCl?.status === 'approved'
+      if (thisApproved) {
+        const nextCl = nextChecklists[child.id]
+        if (!nextCl || nextCl.checklist_items.length === 0) ensureChecklist(child.id, nextWeekStart)
+      } else {
+        const childChores = getChildChores(child.id)
+        if (!thisWeekCl || thisWeekCl.checklist_items.length === 0) {
+          ensureChecklist(child.id, weekStart, childChores.length > 0 ? childChores : undefined)
+        }
       }
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, children])
+  }, [loading, children, checklists])
 
   function getChildChores(childId: string): ChoreTemplate[] {
     const assigned = assignments[childId]
@@ -224,13 +273,13 @@ export default function ChildrenPage() {
     return chores
   }
 
-  async function syncNewItems(childId: string, items: (ChecklistItem & { chore_templates: ChoreTemplate })[], checklistId: string, currentExtra: number): Promise<number> {
+  async function syncNewItems(childId: string, items: (ChecklistItem & { chore_templates: ChoreTemplate })[], checklistId: string, currentExtra: number, logMap: Record<string, LogEntry[]>): Promise<number> {
     const syncBatch: PromiseLike<unknown>[] = []
     let dirty = false
     for (const item of items) {
       if (item.chore_templates?.type !== 'extra') continue
       if (item.admin_adjusted) continue
-      const logCount = taskLogs[`${childId}-${item.chore_id}`]?.length ?? 0
+      const logCount = logMap[`${childId}-${item.chore_id}`]?.length ?? 0
       if (logCount > 0 && item.count !== logCount) {
         const reward = logCount * (item.chore_templates.reward_amount ?? 0)
         item.count = logCount
@@ -247,8 +296,13 @@ export default function ChildrenPage() {
     return newExtra
   }
 
-  async function ensureChecklist(childId: string, childChores?: ChoreTemplate[]): Promise<ChecklistWithItems> {
-    if (checklists[childId]?.checklist_items.length > 0) return checklists[childId]
+  async function ensureChecklist(childId: string, targetWeekStart: string, childChores?: ChoreTemplate[]): Promise<ChecklistWithItems> {
+    const isNext = targetWeekStart === nextWeekStart
+    const clMap = isNext ? nextChecklists : checklists
+    const setClMap = isNext ? setNextChecklists : setChecklists
+    const logMap = isNext ? nextTaskLogs : taskLogs
+
+    if (clMap[childId]?.checklist_items.length > 0) return clMap[childId]
     const assigned = childChores ?? getChildChores(childId)
     const choresToUse = assigned.length > 0 ? assigned : chores
 
@@ -256,7 +310,7 @@ export default function ChildrenPage() {
       .from('weekly_checklists')
       .select('*, checklist_items(*, chore_templates(*))')
       .eq('child_id', childId)
-      .eq('week_start', weekStart)
+      .eq('week_start', targetWeekStart)
       .single()
 
     if (existing) {
@@ -268,18 +322,18 @@ export default function ChildrenPage() {
           .from('weekly_checklists').select('*, checklist_items(*, chore_templates(*))').eq('id', existing.id).single()
         if (refilled) {
           const r = refilled as ChecklistWithItems
-          r.extra_amount = await syncNewItems(childId, r.checklist_items, r.id, r.extra_amount)
-          setChecklists(prev => ({ ...prev, [childId]: r }))
+          r.extra_amount = await syncNewItems(childId, r.checklist_items, r.id, r.extra_amount, logMap)
+          setClMap(prev => ({ ...prev, [childId]: r }))
           return r
         }
       }
-      setChecklists(prev => ({ ...prev, [childId]: existing as ChecklistWithItems }))
+      setClMap(prev => ({ ...prev, [childId]: existing as ChecklistWithItems }))
       return existing as ChecklistWithItems
     }
 
     const { data: newCl } = await supabase
       .from('weekly_checklists')
-      .insert({ child_id: childId, week_start: weekStart, base_amount: 0, extra_amount: 0 })
+      .insert({ child_id: childId, week_start: targetWeekStart, base_amount: 0, extra_amount: 0 })
       .select().single()
 
     // If insert failed (race condition or RLS), try to fetch what's already there
@@ -288,13 +342,13 @@ export default function ChildrenPage() {
         .from('weekly_checklists')
         .select('*, checklist_items(*, chore_templates(*))')
         .eq('child_id', childId)
-        .eq('week_start', weekStart)
+        .eq('week_start', targetWeekStart)
         .single()
       if (fallback) {
-        setChecklists(prev => ({ ...prev, [childId]: fallback as ChecklistWithItems }))
+        setClMap(prev => ({ ...prev, [childId]: fallback as ChecklistWithItems }))
         return fallback as ChecklistWithItems
       }
-      return checklists[childId]
+      return clMap[childId]
     }
 
     if (choresToUse.length > 0) {
@@ -307,13 +361,16 @@ export default function ChildrenPage() {
       .from('weekly_checklists').select('*, checklist_items(*, chore_templates(*))').eq('id', newCl.id).single()
 
     const result = full as ChecklistWithItems
-    result.extra_amount = await syncNewItems(childId, result.checklist_items, result.id, result.extra_amount)
-    setChecklists(prev => ({ ...prev, [childId]: result }))
+    result.extra_amount = await syncNewItems(childId, result.checklist_items, result.id, result.extra_amount, logMap)
+    setClMap(prev => ({ ...prev, [childId]: result }))
     return result
   }
 
   async function toggleItem(childId: string, itemId: string, chore: ChoreTemplate, checked: boolean) {
-    const cl = await ensureChecklist(childId)
+    const thisApproved = checklists[childId]?.status === 'approved'
+    const targetWeekStart = thisApproved ? nextWeekStart : weekStart
+    const setClMap = thisApproved ? setNextChecklists : setChecklists
+    const cl = await ensureChecklist(childId, targetWeekStart)
     await supabase.from('checklist_items').update({ checked, reward_earned: 0, count: 0 }).eq('id', itemId)
     const updatedItems = cl.checklist_items.map(i =>
       i.id === itemId ? { ...i, checked, reward_earned: 0, count: 0 } : i
@@ -323,14 +380,17 @@ export default function ChildrenPage() {
     const baseAmount = requiredAll ? defaultAllowance : 0
     const extraAmount = updatedItems.filter(i => i.chore_templates?.type === 'extra').reduce((s, i) => s + i.reward_earned, 0)
     await supabase.from('weekly_checklists').update({ base_amount: baseAmount, extra_amount: extraAmount }).eq('id', cl.id)
-    setChecklists(prev => ({
+    setClMap(prev => ({
       ...prev,
       [childId]: { ...cl, base_amount: baseAmount, extra_amount: extraAmount, checklist_items: updatedItems } as ChecklistWithItems,
     }))
   }
 
   async function setExtraCount(childId: string, itemId: string, chore: ChoreTemplate, count: number) {
-    const cl = await ensureChecklist(childId)
+    const thisApproved = checklists[childId]?.status === 'approved'
+    const targetWeekStart = thisApproved ? nextWeekStart : weekStart
+    const setClMap = thisApproved ? setNextChecklists : setChecklists
+    const cl = await ensureChecklist(childId, targetWeekStart)
     const reward = count * (chore.reward_amount ?? 0)
     await supabase.from('checklist_items').update({ count, checked: count > 0, reward_earned: reward, admin_adjusted: true }).eq('id', itemId)
     const updatedItems = cl.checklist_items.map(i =>
@@ -341,7 +401,7 @@ export default function ChildrenPage() {
     const baseAmount = requiredAll ? defaultAllowance : 0
     const extraAmount = updatedItems.filter(i => i.chore_templates?.type === 'extra').reduce((s, i) => s + i.reward_earned, 0)
     await supabase.from('weekly_checklists').update({ base_amount: baseAmount, extra_amount: extraAmount }).eq('id', cl.id)
-    setChecklists(prev => ({
+    setClMap(prev => ({
       ...prev,
       [childId]: { ...cl, base_amount: baseAmount, extra_amount: extraAmount, checklist_items: updatedItems } as ChecklistWithItems,
     }))
@@ -350,7 +410,9 @@ export default function ChildrenPage() {
   async function approveAllowance(child: Profile) {
     setChecklistSaving(child.id)
     setMsg('')
-    const cl = await ensureChecklist(child.id)
+    const thisApproved = checklists[child.id]?.status === 'approved'
+    const targetWeekStart = thisApproved ? nextWeekStart : weekStart
+    const cl = await ensureChecklist(child.id, targetWeekStart)
     const total = cl.base_amount + cl.extra_amount
 
     const { data: { user } } = await supabase.auth.getUser()
@@ -602,13 +664,17 @@ export default function ChildrenPage() {
       ) : (
         children.map(child => {
           const section = activeSection[child.id] ?? null
-          const cl = checklists[child.id]
+          const thisWeekCl = checklists[child.id]
+          const thisApproved = thisWeekCl?.status === 'approved'
+          const cl = thisApproved ? nextChecklists[child.id] : thisWeekCl
           const items = cl?.checklist_items ?? []
           const total = (cl?.base_amount ?? 0) + (cl?.extra_amount ?? 0)
-          const approved = cl?.status === 'approved'
           const reqItems = items.filter(i => i.chore_templates?.type === 'required')
           const extraItems = items.filter(i => i.chore_templates?.type === 'extra')
           const reqAllChecked = reqItems.length > 0 && reqItems.every(i => i.checked)
+          const activeLogs = thisApproved ? nextTaskLogs : taskLogs
+          const activeWeekStart = thisApproved ? nextWeekStart : weekStart
+          const isActiveWeekToday = activeWeekStart === todayStr
           const childWithdrawals = withdrawals.filter(w => w.child_id === child.id)
           const adjustForm = adjustForms[child.id] ?? { amount: '', description: '', type: 'deposit' as const, tithe: false }
           const assignedIds = assignments[child.id]
@@ -620,7 +686,7 @@ export default function ChildrenPage() {
             {
               key: 'checklist' as SectionKey,
               label: '✅ Checklist',
-              badge: approved ? null : total > 0 ? formatMoney(total) : null,
+              badge: thisApproved ? null : total > 0 ? formatMoney(total) : null,
               badgeBg: '#dcfce7', badgeColor: '#15803d',
             },
             {
@@ -875,9 +941,9 @@ export default function ChildrenPage() {
                       </div>
                     )
                   })}
-                  {approved ? (
-                    <>
-                      {!completedTithes.has(cl?.id ?? '') && (
+                  <>
+                      {/* Tithe pending for the approved week */}
+                      {thisApproved && !completedTithes.has(thisWeekCl?.id ?? '') && (
                         <div style={{
                           background: '#fefce8', border: '1px solid #fde047',
                           borderRadius: '0.75rem', padding: '1rem', marginBottom: '1.25rem',
@@ -885,76 +951,21 @@ export default function ChildrenPage() {
                           color: '#854d0e', fontWeight: 600,
                         }}>
                           <span style={{ fontSize: '1.25rem' }}>⏳</span>
-                          {`Allowance approved — ${formatMoney(total)} waiting for tithe decision`}
+                          {`This week approved — waiting for tithe decision`}
                         </div>
                       )}
-                      {/* Part 1: read-only reset */}
-                      <div style={{ marginBottom: '1.25rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                          <span style={{ background: '#dbeafe', color: '#1d4ed8', fontSize: '0.75rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px' }}>
-                            PART 1 — Required
-                          </span>
-                          <span style={{ fontSize: '0.8rem', color: '#64748b' }}>All checked = {formatMoney(defaultAllowance)}</span>
-                        </div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                          {reqItems.map(item => {
-                            const chore = item.chore_templates
-                            if (!chore) return null
-                            return (
-                              <div key={item.id} style={{
-                                display: 'flex', alignItems: 'center', gap: '0.75rem',
-                                padding: '0.625rem 0.875rem', background: '#f8fafc',
-                                borderRadius: '0.625rem', border: '1px solid #e2e8f0',
-                              }}>
-                                <input type="checkbox" checked={false} disabled style={{ width: '17px', height: '17px' }} />
-                                <span style={{ fontWeight: 500, flex: 1, color: '#94a3b8' }}>{chore.name}</span>
-                              </div>
-                            )
-                          })}
-                          {reqItems.length === 0 && (
-                            <p style={{ color: '#94a3b8', fontSize: '0.875rem', padding: '0.5rem 0' }}>
-                              No required chores assigned. Go to Settings to assign chores.
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                      {/* Part 2: read-only reset */}
-                      {extrasForChild.length > 0 && (
-                        <div style={{ marginBottom: '1.25rem' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' }}>
-                            <span style={{ background: '#fef3c7', color: '#d97706', fontSize: '0.75rem', fontWeight: 700, padding: '0.2rem 0.6rem', borderRadius: '999px' }}>
-                              PART 2 — Extra Rewards
-                            </span>
-                          </div>
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                            {extrasForChild.map(chore => (
-                              <div key={chore.id} style={{
-                                display: 'flex', alignItems: 'center', gap: '0.5rem',
-                                padding: '0.625rem 0.875rem', background: '#f8fafc',
-                                borderRadius: '0.625rem', border: '1px solid #e2e8f0',
-                              }}>
-                                <span style={{ fontWeight: 500, flex: 1, fontSize: '0.9rem', color: '#94a3b8' }}>{chore.name}</span>
-                                <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>{formatMoney(chore.reward_amount ?? 0)}/session</span>
-                                <span style={{ background: '#f1f5f9', color: '#94a3b8', fontSize: '0.95rem', fontWeight: 700, minWidth: '1.5rem', textAlign: 'center' }}>0</span>
-                                <span style={{ background: '#f1f5f9', color: '#94a3b8', fontSize: '0.8rem', fontWeight: 700, padding: '0.15rem 0.5rem', borderRadius: '999px', minWidth: '2.75rem', textAlign: 'right' }}>+$0</span>
-                              </div>
-                            ))}
-                          </div>
+                      {thisApproved && (
+                        <div style={{
+                          background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '0.75rem',
+                          padding: '0.625rem 1rem', marginBottom: '1.25rem',
+                          display: 'flex', alignItems: 'center', gap: '0.5rem',
+                          color: '#15803d', fontWeight: 600, fontSize: '0.875rem',
+                        }}>
+                          <span>✅</span>
+                          <span>This week approved — showing next week&apos;s checklist</span>
                         </div>
                       )}
-                      {/* Approved footer */}
-                      <div style={{
-                        background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '0.75rem',
-                        padding: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem',
-                        color: '#15803d', fontWeight: 600,
-                      }}>
-                        <span>✅</span>
-                        <span>Week approved — next checklist opens on Saturday</span>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      {!isSaturday && (
+                      {!isActiveWeekToday && !thisApproved && (
                         <div style={{
                           background: '#f8fafc', border: '1px solid #e2e8f0',
                           borderRadius: '0.75rem', padding: '0.75rem 1rem',
@@ -987,9 +998,9 @@ export default function ChildrenPage() {
                                 transition: 'all 0.15s',
                               }}>
                                 <input type="checkbox" checked={item.checked}
-                                  onChange={e => isSaturday && toggleItem(child.id, item.id, chore, e.target.checked)}
-                                  disabled={!isSaturday}
-                                  style={{ width: '17px', height: '17px', cursor: isSaturday ? 'pointer' : 'not-allowed', accentColor: '#16a34a' }} />
+                                  onChange={e => isActiveWeekToday && toggleItem(child.id, item.id, chore, e.target.checked)}
+                                  disabled={!isActiveWeekToday}
+                                  style={{ width: '17px', height: '17px', cursor: isActiveWeekToday ? 'pointer' : 'not-allowed', accentColor: '#16a34a' }} />
                                 <span style={{ fontWeight: 500, flex: 1 }}>{chore.name}</span>
                                 {item.checked && <span style={{ color: '#16a34a', fontSize: '0.85rem', fontWeight: 600 }}>✓</span>}
                               </label>
@@ -1024,7 +1035,7 @@ export default function ChildrenPage() {
                               const count = item.count ?? 0
                               const earned = count * (chore.reward_amount ?? 0)
                               const logKey = `${child.id}-${chore.id}`
-                              const logs = taskLogs[logKey] ?? []
+                              const logs = activeLogs[logKey] ?? []
                               const isExpanded = expandedLogs[logKey] ?? false
                               return (
                                 <div key={chore.id} style={{ border: `1px solid ${count > 0 ? '#fde68a' : '#e2e8f0'}`, borderRadius: '0.625rem', overflow: 'hidden' }}>
@@ -1135,13 +1146,16 @@ export default function ChildrenPage() {
                         <button
                           className="btn-primary"
                           onClick={() => approveAllowance(child)}
-                          disabled={checklistSaving === child.id || total === 0 || !isSaturday}
+                          disabled={checklistSaving === child.id || total === 0 || !isActiveWeekToday}
                         >
-                          {checklistSaving === child.id ? 'Approving...' : !isSaturday ? 'Available on Saturday' : `Approve & Pay ${formatMoney(total)}`}
+                          {checklistSaving === child.id
+                            ? 'Approving...'
+                            : !isActiveWeekToday
+                              ? `Available ${new Date(activeWeekStart + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`
+                              : `Approve & Pay ${formatMoney(total)}`}
                         </button>
                       </div>
                     </>
-                  )}
                 </div>
               )}
 
