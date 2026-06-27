@@ -60,7 +60,7 @@ const TX_STYLES: Record<string, { bg: string; color: string; label: string; emoj
   tithe:      { bg: '#ede9fe', color: '#7c3aed', label: 'Tithe',     emoji: '🙏' },
   withdrawal: { bg: '#fee2e2', color: '#b91c1c', label: 'Spending',  emoji: '🛍️' },
   deposit:    { bg: '#d1fae5', color: '#065f46', label: 'Deposit',   emoji: '🎁' },
-  adjustment: { bg: '#f1f5f9', color: '#475569', label: 'Adjustment',emoji: '📝' },
+  adjustment: { bg: '#f1f5f9', color: '#475569', label: 'Add/Remove', emoji: '🧮' },
 }
 
 export default function ChildrenPage() {
