@@ -717,7 +717,7 @@ export default function ChildrenPage() {
             },
             {
               key: 'adjust' as SectionKey,
-              label: '⚙️ Adjust',
+              label: '🧮 Add/Remove',
               badge: null,
               badgeBg: '', badgeColor: '',
             },
