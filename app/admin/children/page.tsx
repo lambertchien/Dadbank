@@ -694,7 +694,7 @@ export default function ChildrenPage() {
           const reqAllChecked = reqItems.length > 0 && reqItems.every(i => i.checked)
           const activeLogs = thisApproved ? nextTaskLogs : taskLogs
           const activeWeekStart = thisApproved ? nextWeekStart : weekStart
-          const isActiveWeekToday = activeWeekStart === todayStr
+          const isActiveWeekToday = todayStr >= activeWeekStart
           const childWithdrawals = withdrawals.filter(w => w.child_id === child.id)
           const adjustForm = adjustForms[child.id] ?? { amount: '', description: '', type: 'deposit' as const, tithe: false }
           const assignedIds = assignments[child.id]
@@ -1334,7 +1334,11 @@ export default function ChildrenPage() {
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.625rem' }}>
                         {weeks.map(week => {
                           const isOpen = expandedWeeks[week.id] ?? false
-                          const weekLabel = new Date(week.week_start + 'T12:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+                          const satDate = new Date(week.week_start + 'T12:00:00')
+                          const sunDate = new Date(satDate)
+                          sunDate.setDate(sunDate.getDate() - 6)
+                          const sameMonth = sunDate.getMonth() === satDate.getMonth()
+                          const weekLabel = `${sunDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}–${satDate.toLocaleDateString('en-US', sameMonth ? { day: 'numeric' } : { month: 'short', day: 'numeric' })}`
                           const approvedLabel = week.approved_at
                             ? new Date(week.approved_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                             : null
@@ -1356,7 +1360,7 @@ export default function ChildrenPage() {
                               >
                                 <div style={{ flex: 1 }}>
                                   <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#1e293b' }}>
-                                    Week of {weekLabel}
+                                    Week {weekLabel}
                                   </div>
                                   <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.1rem' }}>
                                     {approvedLabel && approverName

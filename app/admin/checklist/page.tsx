@@ -401,7 +401,7 @@ export default function ChecklistPage() {
         const cl = thisApproved ? nextChecklists[child.id] : thisWeekCl
         const activeLogs = thisApproved ? nextTaskLogs : taskLogs
         const activeWeekStart = thisApproved ? nextWeekStart : weekStart
-        const isActiveWeekToday = activeWeekStart === todayStr
+        const isActiveWeekToday = todayStr >= activeWeekStart
 
         const items = cl?.checklist_items ?? []
         const total = (cl?.base_amount ?? 0) + (cl?.extra_amount ?? 0)
