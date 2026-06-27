@@ -686,7 +686,7 @@ export default function ChildrenPage() {
             {
               key: 'checklist' as SectionKey,
               label: '✅ Checklist',
-              badge: thisApproved ? null : total > 0 ? formatMoney(total) : null,
+              badge: total > 0 ? formatMoney(total) : null,
               badgeBg: '#dcfce7', badgeColor: '#15803d',
             },
             {
