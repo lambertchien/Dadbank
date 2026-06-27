@@ -50,7 +50,7 @@ function getTodayStr() {
 
 type ChecklistWithItems = WeeklyChecklist & { checklist_items: (ChecklistItem & { chore_templates: ChoreTemplate })[] }
 type WRWithProfile = WithdrawalRequest & { profiles: { name: string; balance: number } }
-type SectionKey = 'checklist' | 'withdrawals' | 'adjust' | 'history' | 'weeks' | 'password'
+type SectionKey = 'checklist' | 'withdrawals' | 'adjust' | 'history' | 'weeks'
 type AdjustForm = { amount: string; description: string; type: 'deposit' | 'adjustment'; tithe: boolean }
 type ManualTitheRecord = { id: string; income_amount: number; completed: boolean; description: string | null; created_at: string }
 
@@ -104,8 +104,6 @@ export default function ChildrenPage() {
   const [adminNames, setAdminNames] = useState<Record<string, string>>({})
   const [expandedWeeks, setExpandedWeeks] = useState<Record<string, boolean>>({})
 
-  const [resetPasswords, setResetPasswords] = useState<Record<string, string>>({})
-  const [resetSaving, setResetSaving] = useState<string | null>(null)
 
   // Extra task logs: keyed by `${childId}-${choreId}`
   const [taskLogs, setTaskLogs] = useState<Record<string, LogEntry[]>>({})
@@ -656,23 +654,6 @@ export default function ChildrenPage() {
     setWeekHistoryLoading(prev => { const s = new Set(prev); s.delete(childId); return s })
   }
 
-  async function resetPassword(child: Profile) {
-    const password = resetPasswords[child.id] ?? ''
-    if (password.length < 6) { setMsg('Password must be at least 6 characters'); return }
-    setResetSaving(child.id)
-    setMsg('')
-    const res = await fetch('/api/admin/reset-child-password', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ childId: child.id, password }),
-    })
-    const json = await res.json()
-    if (!res.ok) { setMsg(json.error ?? 'Reset failed'); setResetSaving(null); return }
-    setMsg(`Password updated for ${child.name}`)
-    setResetPasswords(prev => ({ ...prev, [child.id]: '' }))
-    setResetSaving(null)
-    setTimeout(() => setMsg(''), 3000)
-  }
 
 
   if (loading) return <div style={{ padding: '3rem', textAlign: 'center', color: '#94a3b8' }}>Loading...</div>
@@ -736,25 +717,19 @@ export default function ChildrenPage() {
             },
             {
               key: 'adjust' as SectionKey,
-              label: '⚙️ Manual +/-',
+              label: '⚙️ Adjust',
               badge: null,
               badgeBg: '', badgeColor: '',
             },
             {
               key: 'history' as SectionKey,
-              label: '📊 History',
+              label: '📊 Transactions',
               badge: null,
               badgeBg: '', badgeColor: '',
             },
             {
               key: 'weeks' as SectionKey,
-              label: '📅 Weeks',
-              badge: null,
-              badgeBg: '', badgeColor: '',
-            },
-            {
-              key: 'password' as SectionKey,
-              label: '🔑 Password',
+              label: '📅 AllowanceLog',
               badge: null,
               badgeBg: '', badgeColor: '',
             },
@@ -1345,33 +1320,6 @@ export default function ChildrenPage() {
                 </div>
               )}
 
-              {/* Password section */}
-              {section === 'password' && (
-                <div style={{ padding: '1.5rem' }}>
-                  <p style={{ fontSize: '0.875rem', color: '#64748b', marginTop: 0, marginBottom: '1rem' }}>
-                    Set a new password for {child.name}. They&apos;ll use it next time they log in.
-                  </p>
-                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                    <div style={{ flex: 1, minWidth: '200px' }}>
-                      <label className="label">New Password</label>
-                      <input
-                        className="input"
-                        type="password"
-                        placeholder="Min 6 characters"
-                        value={resetPasswords[child.id] ?? ''}
-                        onChange={e => setResetPasswords(prev => ({ ...prev, [child.id]: e.target.value }))}
-                      />
-                    </div>
-                    <button
-                      className="btn-primary"
-                      onClick={() => resetPassword(child)}
-                      disabled={resetSaving === child.id || (resetPasswords[child.id] ?? '').length < 6}
-                    >
-                      {resetSaving === child.id ? 'Saving...' : 'Set Password'}
-                    </button>
-                  </div>
-                </div>
-              )}
 
               {/* Weeks (allowance history) section */}
               {section === 'weeks' && (() => {

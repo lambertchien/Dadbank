@@ -29,6 +29,9 @@ export default function SettingsPage() {
   const [addChores, setAddChores] = useState<string[]>([])
   const [addingSaving, setAddingSaving] = useState(false)
   const [deletingSaving, setDeletingSaving] = useState('')
+  const [childPwExpanded, setChildPwExpanded] = useState<Record<string, boolean>>({})
+  const [childPwInputs, setChildPwInputs] = useState<Record<string, string>>({})
+  const [childPwSaving, setChildPwSaving] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     const [{ data: s }, { data: cr }, { data: cat }, { data: ch }, { data: asgn }, { data: { user } }] = await Promise.all([
@@ -267,6 +270,25 @@ export default function SettingsPage() {
       setMsg(json.error ?? 'Delete failed')
     }
     setDeletingSaving('')
+    setTimeout(() => setMsg(''), 3000)
+  }
+
+  async function resetChildPassword(childId: string, childName: string) {
+    const password = childPwInputs[childId] ?? ''
+    if (password.length < 6) return
+    setChildPwSaving(childId)
+    setMsg('')
+    const res = await fetch('/api/admin/reset-child-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ childId, password }),
+    })
+    const json = await res.json()
+    if (!res.ok) { setMsg(json.error ?? 'Reset failed'); setChildPwSaving(null); return }
+    setMsg(`Password updated for ${childName}`)
+    setChildPwInputs(prev => ({ ...prev, [childId]: '' }))
+    setChildPwExpanded(prev => ({ ...prev, [childId]: false }))
+    setChildPwSaving(null)
     setTimeout(() => setMsg(''), 3000)
   }
 
@@ -674,33 +696,68 @@ export default function SettingsPage() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             {children.map(child => (
               <div key={child.id} style={{
-                display: 'flex', alignItems: 'center', gap: '1rem',
-                padding: '0.75rem 1rem', background: '#f8fafc',
-                borderRadius: '0.75rem', border: '1px solid #e2e8f0',
+                background: '#f8fafc', borderRadius: '0.75rem',
+                border: '1px solid #e2e8f0', overflow: 'hidden',
               }}>
-                <div style={{
-                  width: '36px', height: '36px', background: '#dcfce7', borderRadius: '50%',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontWeight: 700, color: '#16a34a', fontSize: '1rem', flexShrink: 0,
-                }}>
-                  {child.name.charAt(0)}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', padding: '0.75rem 1rem' }}>
+                  <div style={{
+                    width: '36px', height: '36px', background: '#dcfce7', borderRadius: '50%',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontWeight: 700, color: '#16a34a', fontSize: '1rem', flexShrink: 0,
+                  }}>
+                    {child.name.charAt(0)}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600 }}>{child.name}</div>
+                    <div style={{ fontSize: '0.78rem', color: '#64748b' }}>{child.email}</div>
+                  </div>
+                  <button
+                    onClick={() => setChildPwExpanded(prev => ({ ...prev, [child.id]: !prev[child.id] }))}
+                    style={{
+                      fontSize: '0.78rem', color: '#475569', background: 'none',
+                      border: '1px solid #e2e8f0', borderRadius: '0.5rem',
+                      padding: '0.3rem 0.65rem', cursor: 'pointer',
+                    }}
+                  >
+                    🔑 Reset Password
+                  </button>
+                  <button
+                    onClick={() => deleteChild(child.id, child.name)}
+                    disabled={deletingSaving === child.id}
+                    style={{
+                      fontSize: '0.78rem', color: '#dc2626', background: 'none',
+                      border: '1px solid #fecaca', borderRadius: '0.5rem',
+                      padding: '0.3rem 0.65rem', cursor: deletingSaving === child.id ? 'not-allowed' : 'pointer',
+                      opacity: deletingSaving === child.id ? 0.5 : 1,
+                    }}
+                  >
+                    {deletingSaving === child.id ? 'Deleting...' : 'Delete Account'}
+                  </button>
                 </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600 }}>{child.name}</div>
-                  <div style={{ fontSize: '0.78rem', color: '#64748b' }}>{child.email}</div>
-                </div>
-                <button
-                  onClick={() => deleteChild(child.id, child.name)}
-                  disabled={deletingSaving === child.id}
-                  style={{
-                    fontSize: '0.78rem', color: '#dc2626', background: 'none',
-                    border: '1px solid #fecaca', borderRadius: '0.5rem',
-                    padding: '0.3rem 0.65rem', cursor: deletingSaving === child.id ? 'not-allowed' : 'pointer',
-                    opacity: deletingSaving === child.id ? 0.5 : 1,
-                  }}
-                >
-                  {deletingSaving === child.id ? 'Deleting...' : 'Delete Account'}
-                </button>
+                {childPwExpanded[child.id] && (
+                  <div style={{
+                    padding: '0.75rem 1rem', borderTop: '1px solid #e2e8f0', background: 'white',
+                    display: 'flex', gap: '0.75rem', alignItems: 'flex-end', flexWrap: 'wrap',
+                  }}>
+                    <div style={{ flex: 1, minWidth: '200px' }}>
+                      <label className="label">New password for {child.name}</label>
+                      <input
+                        className="input"
+                        type="password"
+                        placeholder="Min 6 characters"
+                        value={childPwInputs[child.id] ?? ''}
+                        onChange={e => setChildPwInputs(prev => ({ ...prev, [child.id]: e.target.value }))}
+                      />
+                    </div>
+                    <button
+                      className="btn-primary"
+                      onClick={() => resetChildPassword(child.id, child.name)}
+                      disabled={childPwSaving === child.id || (childPwInputs[child.id] ?? '').length < 6}
+                    >
+                      {childPwSaving === child.id ? 'Saving...' : 'Set Password'}
+                    </button>
+                  </div>
+                )}
               </div>
             ))}
           </div>
