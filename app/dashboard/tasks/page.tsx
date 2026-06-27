@@ -22,6 +22,17 @@ function getThisSaturday() {
   return `${y}-${mo}-${dd}`
 }
 
+function getNextSaturday() {
+  const d = new Date()
+  const day = d.getDay()
+  const daysToThisSat = day === 6 ? 0 : (6 - day)
+  d.setDate(d.getDate() + daysToThisSat + 7)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
+}
+
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString('en-US', {
     weekday: 'short', month: 'short', day: 'numeric',
@@ -42,18 +53,34 @@ export default function TasksPage() {
   const [adding, setAdding] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
-  const weekStart = getThisSaturday()
+  const [weekStart, setWeekStart] = useState(getThisSaturday())
+  const [nextWeekMode, setNextWeekMode] = useState(false)
 
   const load = useCallback(async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) return
+
+    const thisSaturday = getThisSaturday()
+    const nextSaturday = getNextSaturday()
+
+    // If this week's checklist is already approved, record for next week instead
+    const { data: thisWeekCl } = await supabase
+      .from('weekly_checklists')
+      .select('status')
+      .eq('child_id', user.id)
+      .eq('week_start', thisSaturday)
+      .maybeSingle()
+
+    const activeWeek = thisWeekCl?.status === 'approved' ? nextSaturday : thisSaturday
+    setWeekStart(activeWeek)
+    setNextWeekMode(thisWeekCl?.status === 'approved')
 
     const [{ data: chores }, { data: logData }, { data: assignData }] = await Promise.all([
       supabase.from('chore_templates').select('*').eq('active', true).order('sort_order'),
       supabase.from('extra_task_logs')
         .select('id, chore_id, logged_at')
         .eq('child_id', user.id)
-        .eq('week_start', weekStart)
+        .eq('week_start', activeWeek)
         .order('logged_at', { ascending: false }),
       supabase.from('chore_assignments').select('chore_id').eq('child_id', user.id),
     ])
@@ -63,7 +90,7 @@ export default function TasksPage() {
     setExtras((chores ?? []).filter(c => c.type === 'extra' && (assignedIds.size === 0 || assignedIds.has(c.id))))
     setLogs(logData ?? [])
     setLoading(false)
-  }, [supabase, weekStart])
+  }, [supabase])
 
   useEffect(() => { load() }, [load])
 
@@ -99,8 +126,19 @@ export default function TasksPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       <div>
         <h1 style={{ fontSize: '1.4rem', fontWeight: 800, margin: 0, color: '#1e293b' }}>My Works</h1>
-        <p style={{ color: '#64748b', fontSize: '0.85rem', marginTop: '0.25rem' }}>Week of {weekLabel}</p>
+        <p style={{ color: '#64748b', fontSize: '0.85rem', marginTop: '0.25rem' }}>
+          {nextWeekMode ? `Next week · ${weekLabel}` : `Week of ${weekLabel}`}
+        </p>
       </div>
+
+      {nextWeekMode && (
+        <div style={{
+          background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '0.75rem',
+          padding: '0.75rem 1rem', fontSize: '0.85rem', color: '#15803d', fontWeight: 500,
+        }}>
+          This week&apos;s allowance is approved! Any extra sessions you log now count for next week.
+        </div>
+      )}
 
       {/* Part I — Required chores (read-only reminder) */}
       <div className="card">
